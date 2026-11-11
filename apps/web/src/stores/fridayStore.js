@@ -3,25 +3,30 @@ import { create } from 'zustand';
 export const useFridayStore = create((set, get) => ({
   conversations: [
     {
-      id: 'conv_welcome',
-      title: 'Welcome to F.R.I.D.A.Y.',
+      id: 'conv_1',
+      title: 'Explain the Code',
       updatedAt: new Date().toISOString()
-    }
-  ],
-  activeConversationId: 'conv_welcome',
-  messages: [
+    },
     {
-      id: 'msg_welcome',
-      role: 'assistant',
-      content: 'Greetings. F.R.I.D.A.Y. neural core is active. I am initialized in your Nebula workspace. How may I assist your operations today?'
+      id: 'conv_2',
+      title: 'Kyoto Solo Trip Itinerary',
+      updatedAt: new Date(Date.now() - 3600000).toISOString()
+    },
+    {
+      id: 'conv_3',
+      title: 'Podcast Ideas: Sustainable Tech',
+      updatedAt: new Date(Date.now() - 7200000).toISOString()
     }
   ],
-  selectedModel: 'claude-3-7-sonnet',
+  activeConversationId: null,
+  messages: [], // Starts empty so the iconic Hero screen with 3D Orb & 3 Quick Cards is displayed!
+  selectedModel: 'nebula-4.0e',
   isStreaming: false,
   streamBuffer: '',
 
   setModel: (model) => set({ selectedModel: model }),
   setActiveConversation: (id) => set({ activeConversationId: id }),
+  newChat: () => set({ messages: [], activeConversationId: null, streamBuffer: '', isStreaming: false }),
 
   appendMessage: (message) => set((state) => ({
     messages: [...state.messages, { ...message, id: `msg_${Date.now()}` }]
