@@ -1,7 +1,6 @@
 import React, { useState } from 'react';
-import { useNavigate } from 'react-router-dom';
+import { useLocation, useNavigate } from 'react-router-dom';
 import {
-  Sparkles,
   Lock,
   Mail,
   User,
@@ -12,38 +11,38 @@ import {
   AlertCircle
 } from 'lucide-react';
 import { useAuthStore } from '../../../stores/authStore';
+import { apiFetch, safeParseJson } from '../../../lib/apiClient';
 import { NebulaOrb } from '../../friday/components/NebulaOrb';
+
+function extractErrorMessage(payload, fallback) {
+  if (Array.isArray(payload?.errors) && payload.errors.length > 0) {
+    return payload.errors.map((e) => e.message).join('. ');
+  }
+  return payload?.message || fallback;
+}
 
 export function Login({ onLoginSuccess }) {
   const navigate = useNavigate();
+  const location = useLocation();
   const { setUser } = useAuthStore();
 
   const [mode, setMode] = useState('login'); // 'login' | 'signup'
   const [name, setName] = useState('');
-  const [email, setEmail] = useState('dev@friday-edith.internal');
-  const [password, setPassword] = useState('DeveloperPassword2026!');
-  const [role, setRole] = useState('DEVELOPER');
+  const [email, setEmail] = useState('');
+  const [password, setPassword] = useState('');
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState('');
   const [successMsg, setSuccessMsg] = useState('');
 
+  const from = location.state?.from;
+  const destination =
+    from?.pathname && from.pathname !== '/login' && from.pathname !== '/'
+      ? `${from.pathname}${from.search || ''}`
+      : '/friday';
+
   const handleGoogleAuth = () => {
-    setLoading(true);
-    setError('');
-    // Simulated Google OAuth authorization flow
-    setTimeout(() => {
-      const googleUser = {
-        id: `usr_google_${Date.now()}`,
-        name: 'Google Operator',
-        email: 'operator@gmail.com',
-        role: 'DEVELOPER',
-        avatar: 'https://lh3.googleusercontent.com/a/default-user'
-      };
-      if (onLoginSuccess) onLoginSuccess();
-      setUser(googleUser, `google_jwt_token_${Date.now()}`);
-      setLoading(false);
-      navigate('/friday');
-    }, 700);
+    setError('Google OAuth is not configured yet. Please sign in or create an account with email and password.');
+    setSuccessMsg('');
   };
 
   const handleSubmit = async (e) => {
@@ -53,83 +52,52 @@ export function Login({ onLoginSuccess }) {
     setSuccessMsg('');
 
     const endpoint = mode === 'login' ? '/v1/auth/login' : '/v1/auth/register';
-    const payload = mode === 'login'
-      ? { email, password }
-      : { email, password, name: name.trim() || 'Cosmic Operator', role };
+    const payload =
+      mode === 'login'
+        ? { email: email.trim(), password }
+        : { email: email.trim(), password, name: name.trim() };
 
     try {
-      const res = await fetch(endpoint, {
+      const res = await apiFetch(endpoint, {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify(payload)
+        body: JSON.stringify(payload),
+        skipAuthRefresh: true
       });
 
-      const data = await res.json();
-      if (res.ok && data.data) {
-        if (onLoginSuccess) onLoginSuccess();
-        setUser(data.data.user, data.data.tokens?.accessToken || 'jwt_active_session');
-        navigate('/friday');
-      } else {
-        if (mode === 'signup') {
-          // Switch to login tab and notify
-          setSuccessMsg('Account registered successfully. Initializing neural core...');
-          setTimeout(() => {
-            if (onLoginSuccess) onLoginSuccess();
-            setUser(
-              {
-                id: `usr_${Date.now()}`,
-                name: name.trim() || 'New Operator',
-                email,
-                role
-              },
-              'jwt_token_new'
-            );
-            navigate('/friday');
-          }, 800);
-        } else {
-          // Demo fallback authorization for seamless local testing
-          if (onLoginSuccess) onLoginSuccess();
-          setUser(
-            {
-              id: 'usr_dev_default',
-              name: 'Lead Engineer',
-              email,
-              role: 'DEVELOPER'
-            },
-            'mock_token_dev'
-          );
-          navigate('/friday');
-        }
+      const data = await safeParseJson(res);
+      if (!res.ok || !data?.data?.user) {
+        setError(
+          extractErrorMessage(
+            data,
+            mode === 'login'
+              ? 'Authentication failed. Check your email and password.'
+              : 'Account creation failed. Verify your details.'
+          )
+        );
+        return;
       }
-    } catch {
-      // Offline graceful fallback
+
       if (onLoginSuccess) onLoginSuccess();
-      setUser(
-        {
-          id: 'usr_dev_default',
-          name: mode === 'signup' ? (name || 'Cosmic Operator') : 'Lead Engineer',
-          email,
-          role: mode === 'signup' ? role : 'DEVELOPER'
-        },
-        'mock_token_fallback'
-      );
-      navigate('/friday');
+      setUser(data.data.user);
+      navigate(destination, { replace: true });
+    } catch {
+      setError('Unable to reach authentication service. Please verify the API server is running.');
     } finally {
       setLoading(false);
     }
   };
 
-  const fillCredentials = (type) => {
+  const fillDevCredentials = (type) => {
+    if (!import.meta.env.DEV) return;
+    setError('');
     if (type === 'admin') {
       setEmail('admin@friday-edith.internal');
       setPassword('AdminPassword2026!');
-      setName('Tony Stark (Admin)');
-      setRole('ADMIN');
+      setName('System Administrator');
     } else {
       setEmail('dev@friday-edith.internal');
       setPassword('DeveloperPassword2026!');
-      setName('Peter Parker (Dev)');
-      setRole('DEVELOPER');
+      setName('Lead Engineer');
     }
   };
 
@@ -181,12 +149,12 @@ export function Login({ onLoginSuccess }) {
           </button>
         </div>
 
-        {/* Google Authentication Button */}
+        {/* Google Authentication Button (Planned OAuth Integration) */}
         <button
           type="button"
           onClick={handleGoogleAuth}
           disabled={loading}
-          className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl frosted-glass-card hover:bg-white/[0.1] text-xs font-semibold text-white transition-all mb-5 group cursor-pointer border border-white/15"
+          className="w-full flex items-center justify-center gap-3 py-2.5 px-4 rounded-xl frosted-glass-card opacity-75 hover:opacity-100 hover:bg-white/[0.08] text-xs font-semibold text-slate-200 transition-all mb-5 cursor-pointer border border-white/15"
         >
           {/* Official Google Multicolored Icon */}
           <svg className="w-4 h-4" viewBox="0 0 24 24">
@@ -207,7 +175,7 @@ export function Login({ onLoginSuccess }) {
               d="M12 5.38c1.62 0 3.06.56 4.21 1.64l3.15-3.15C17.45 2.09 14.97 1 12 1 7.7 1 3.99 3.47 2.18 7.06l3.66 2.84c.87-2.6 3.3-4.52 6.16-4.52z"
             />
           </svg>
-          <span>Continue with Google</span>
+          <span>Continue with Google (OAuth Pending)</span>
         </button>
 
         {/* Divider */}
@@ -286,23 +254,6 @@ export function Login({ onLoginSuccess }) {
             </div>
           </div>
 
-          {mode === 'signup' && (
-            <div>
-              <label className="block text-[11px] font-mono text-purple-300/80 mb-1 uppercase tracking-wider">
-                System Privilege Role
-              </label>
-              <select
-                value={role}
-                onChange={(e) => setRole(e.target.value)}
-                className="w-full bg-black/40 border border-white/10 focus:border-purple-400 rounded-xl px-3 py-2.5 text-xs md:text-sm text-slate-200 focus:outline-none"
-              >
-                <option value="DEVELOPER" className="bg-[#120d24] text-white">Developer (IDE & Runner Access)</option>
-                <option value="ADMIN" className="bg-[#120d24] text-white">Administrator (Full System Control)</option>
-                <option value="USER" className="bg-[#120d24] text-white">Operator (Standard User)</option>
-              </select>
-            </div>
-          )}
-
           <button
             type="submit"
             disabled={loading}
@@ -319,26 +270,30 @@ export function Login({ onLoginSuccess }) {
           </button>
         </form>
 
-        {/* Quick Demo Credentials Fill Buttons */}
-        <div className="mt-5 pt-4 border-t border-white/10 text-center">
-          <p className="text-[10px] font-mono text-slate-400 mb-2 uppercase tracking-wider">Quick Fill Demo Credentials</p>
-          <div className="flex items-center justify-center gap-2">
-            <button
-              type="button"
-              onClick={() => fillCredentials('dev')}
-              className="px-3 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-400/30 text-[11px] font-mono text-purple-300 transition-all cursor-pointer"
-            >
-              Developer
-            </button>
-            <button
-              type="button"
-              onClick={() => fillCredentials('admin')}
-              className="px-3 py-1 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 border border-pink-400/30 text-[11px] font-mono text-pink-300 transition-all cursor-pointer"
-            >
-              Administrator
-            </button>
+        {/* Quick Demo Credentials Fill Buttons (Development Only) */}
+        {import.meta.env.DEV && (
+          <div className="mt-5 pt-4 border-t border-white/10 text-center">
+            <p className="text-[10px] font-mono text-slate-400 mb-2 uppercase tracking-wider">
+              Dev Quick Fill (Local Seeded Accounts)
+            </p>
+            <div className="flex items-center justify-center gap-2">
+              <button
+                type="button"
+                onClick={() => fillDevCredentials('dev')}
+                className="px-3 py-1 rounded-lg bg-purple-500/10 hover:bg-purple-500/20 border border-purple-400/30 text-[11px] font-mono text-purple-300 transition-all cursor-pointer"
+              >
+                Developer
+              </button>
+              <button
+                type="button"
+                onClick={() => fillDevCredentials('admin')}
+                className="px-3 py-1 rounded-lg bg-pink-500/10 hover:bg-pink-500/20 border border-pink-400/30 text-[11px] font-mono text-pink-300 transition-all cursor-pointer"
+              >
+                Administrator
+              </button>
+            </div>
           </div>
-        </div>
+        )}
 
         {/* Security Baseline Footer */}
         <div className="mt-4 flex items-center justify-center gap-5 text-[10px] text-slate-400 font-mono">

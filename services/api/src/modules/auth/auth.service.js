@@ -1,31 +1,80 @@
 import { prisma } from '../../repositories/prisma.js';
-import { hashPassword, verifyPassword, generateTokens } from '../../security/crypto.js';
+import { config } from '../../config/index.js';
+import {
+  generateTokens,
+  hashPassword,
+  hashToken,
+  parseDurationToMs,
+  verifyPassword,
+  verifyToken
+} from '../../security/crypto.js';
 import { auditService } from '../audit/audit.service.js';
 
+function sanitizeUser(user) {
+  return {
+    id: user.id,
+    email: user.email,
+    name: user.name,
+    role: user.role
+  };
+}
+
+function buildAuthError(message, statusCode = 401) {
+  const error = new Error(message);
+  error.statusCode = statusCode;
+  return error;
+}
+
 export class AuthService {
-  async register({ email, password, name, role = 'USER' }, ip) {
-    const normalizedEmail = email.toLowerCase().trim();
-
-    const existingUser = await prisma.user.findUnique({
-      where: { email: normalizedEmail }
-    });
-
-    if (existingUser) {
-      const error = new Error('User with this email already exists');
-      error.statusCode = 409;
-      throw error;
-    }
-
-    const passwordHash = await hashPassword(password);
-
-    const user = await prisma.user.create({
+  /**
+   * Creates a persisted session row storing the hashed refresh token.
+   */
+  async _createSession(tx, userId, refreshToken, { ip = null, userAgent = null } = {}) {
+    const expiresAt = new Date(
+      Date.now() + parseDurationToMs(config.REFRESH_TOKEN_EXPIRES_IN, 7 * 86_400_000)
+    );
+    return tx.session.create({
       data: {
-        email: normalizedEmail,
-        name,
-        passwordHash,
-        role
+        userId,
+        tokenHash: hashToken(refreshToken),
+        ipAddress: ip || null,
+        userAgent: userAgent ? String(userAgent).slice(0, 255) : null,
+        expiresAt
       }
     });
+  }
+
+  /**
+   * Registers a new standard USER account. Client-supplied roles are never honored on public signup.
+   */
+  async register({ email, password, name }, ip = null, userAgent = null) {
+    const normalizedEmail = email.toLowerCase().trim();
+    const passwordHash = await hashPassword(password);
+
+    let user;
+    try {
+      user = await prisma.user.create({
+        data: {
+          email: normalizedEmail,
+          name: name.trim(),
+          passwordHash,
+          role: 'USER' // Unconditionally force USER on public signup
+        }
+      });
+    } catch (err) {
+      if (err?.code === 'P2002') {
+        throw buildAuthError('User with this email already exists', 409);
+      }
+      throw err;
+    }
+
+    const tokens = generateTokens({
+      sub: user.id,
+      email: user.email,
+      role: user.role
+    });
+
+    await this._createSession(prisma, user.id, tokens.refreshToken, { ip, userAgent });
 
     await auditService.logEvent({
       action: 'USER_REGISTERED',
@@ -36,19 +85,16 @@ export class AuthService {
       ip
     });
 
-    const tokens = generateTokens({
-      sub: user.id,
-      email: user.email,
-      role: user.role
-    });
-
     return {
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
+      user: sanitizeUser(user),
       tokens
     };
   }
 
-  async login({ email, password }, ip) {
+  /**
+   * Verifies credentials, starts a tracked refresh session, and returns signed tokens.
+   */
+  async login({ email, password }, ip = null, userAgent = null) {
     const normalizedEmail = email.toLowerCase().trim();
 
     const user = await prisma.user.findUnique({
@@ -65,9 +111,7 @@ export class AuthService {
         ip,
         status: 'FAILURE'
       });
-      const error = new Error('Invalid email or password');
-      error.statusCode = 401;
-      throw error;
+      throw buildAuthError('Invalid email or password', 401);
     }
 
     const isValid = await verifyPassword(user.passwordHash, password);
@@ -81,10 +125,16 @@ export class AuthService {
         ip,
         status: 'FAILURE'
       });
-      const error = new Error('Invalid email or password');
-      error.statusCode = 401;
-      throw error;
+      throw buildAuthError('Invalid email or password', 401);
     }
+
+    const tokens = generateTokens({
+      sub: user.id,
+      email: user.email,
+      role: user.role
+    });
+
+    await this._createSession(prisma, user.id, tokens.refreshToken, { ip, userAgent });
 
     await auditService.logEvent({
       action: 'USER_LOGIN_SUCCESS',
@@ -94,31 +144,139 @@ export class AuthService {
       ip
     });
 
-    const tokens = generateTokens({
-      sub: user.id,
-      email: user.email,
-      role: user.role
+    return {
+      user: sanitizeUser(user),
+      tokens
+    };
+  }
+
+  /**
+   * Validates and atomically rotates a refresh token, rejecting revoked or replayed sessions.
+   */
+  async refreshSession(refreshToken, ip = null, userAgent = null) {
+    if (!refreshToken) {
+      throw buildAuthError('Refresh token is required', 401);
+    }
+
+    let decoded;
+    try {
+      decoded = verifyToken(refreshToken, 'refresh');
+    } catch {
+      throw buildAuthError('Invalid or expired refresh token', 401);
+    }
+
+    const tokenHash = hashToken(refreshToken);
+    const existing = await prisma.session.findUnique({
+      where: { tokenHash },
+      include: { user: true }
+    });
+
+    if (!existing) {
+      await auditService.logEvent({
+        action: 'TOKEN_REFRESH_REPLAY_DETECTED',
+        userId: decoded.sub,
+        resourceType: 'SESSION',
+        resourceId: decoded.sub,
+        details: { reason: 'Refresh token not found in active sessions' },
+        ip,
+        status: 'FAILURE'
+      });
+      throw buildAuthError('Session is invalid or has been revoked', 401);
+    }
+
+    if (existing.expiresAt <= new Date() || !existing.user || !existing.user.isActive) {
+      await prisma.session.deleteMany({ where: { id: existing.id } });
+      throw buildAuthError('Session expired or user inactive', 401);
+    }
+
+    const newTokens = generateTokens({
+      sub: existing.user.id,
+      email: existing.user.email,
+      role: existing.user.role
+    });
+
+    await prisma.$transaction(async (tx) => {
+      const deleted = await tx.session.deleteMany({ where: { id: existing.id } });
+      if (deleted.count === 0) {
+        throw buildAuthError('Session was already rotated or revoked', 401);
+      }
+      await this._createSession(tx, existing.user.id, newTokens.refreshToken, { ip, userAgent });
+    });
+
+    await auditService.logEvent({
+      action: 'TOKEN_REFRESHED',
+      userId: existing.user.id,
+      resourceType: 'SESSION',
+      resourceId: existing.id,
+      ip
     });
 
     return {
-      user: { id: user.id, email: user.email, name: user.name, role: user.role },
-      tokens
+      user: sanitizeUser(existing.user),
+      tokens: newTokens
     };
+  }
+
+  /**
+   * Revokes the active session associated with the provided refresh token.
+   */
+  async logout({ refreshToken = null, userId = null, ip = null }) {
+    if (refreshToken) {
+      const tokenHash = hashToken(refreshToken);
+      const existing = await prisma.session.findUnique({ where: { tokenHash } });
+      if (existing) {
+        userId = userId || existing.userId;
+        await prisma.session.deleteMany({ where: { id: existing.id } });
+      }
+    }
+
+    await auditService.logEvent({
+      action: 'USER_LOGOUT',
+      userId,
+      resourceType: 'SESSION',
+      resourceId: userId,
+      ip
+    });
+  }
+
+  /**
+   * Protected admin-only operation to assign a user's RBAC role.
+   */
+  async assignUserRole({ targetUserId, role, actorId, ip = null }) {
+    const existing = await prisma.user.findUnique({ where: { id: targetUserId } });
+    if (!existing) {
+      throw buildAuthError('User not found', 404);
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: targetUserId },
+      data: { role }
+    });
+
+    await auditService.logEvent({
+      action: 'USER_ROLE_UPDATED',
+      userId: actorId,
+      resourceType: 'USER',
+      resourceId: targetUserId,
+      details: { previousRole: existing.role, newRole: role },
+      ip
+    });
+
+    return sanitizeUser(updated);
   }
 
   async getProfile(userId) {
     const user = await prisma.user.findUnique({
       where: { id: userId },
-      select: { id: true, email: true, name: true, role: true, createdAt: true }
+      select: { id: true, email: true, name: true, role: true, isActive: true, createdAt: true }
     });
 
-    if (!user) {
-      const error = new Error('User not found');
-      error.statusCode = 404;
-      throw error;
+    if (!user || !user.isActive) {
+      throw buildAuthError(user ? 'Account is inactive' : 'User not found', user ? 403 : 404);
     }
 
-    return user;
+    const { isActive, ...profile } = user;
+    return profile;
   }
 }
 

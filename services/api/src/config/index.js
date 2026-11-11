@@ -10,6 +10,8 @@ const __dirname = path.dirname(__filename);
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config();
 
+const DEFAULT_DEV_JWT_SECRET = 'development_jwt_secret_must_be_overridden_in_prod';
+
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
   PORT: z.coerce.number().default(3000),
@@ -17,9 +19,18 @@ const envSchema = z.object({
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
 
   // Auth & Secrets
-  JWT_SECRET: z.string().min(16).default('development_jwt_secret_must_be_overridden_in_prod'),
+  JWT_SECRET: z.string().min(16).default(DEFAULT_DEV_JWT_SECRET),
+  JWT_ISSUER: z.string().default('friday-edith-api'),
+  JWT_AUDIENCE: z.string().default('friday-edith-clients'),
   JWT_EXPIRES_IN: z.string().default('15m'),
   REFRESH_TOKEN_EXPIRES_IN: z.string().default('7d'),
+  ACCESS_COOKIE_NAME: z.string().default('friday_access_token'),
+  REFRESH_COOKIE_NAME: z.string().default('friday_refresh_token'),
+  CSRF_COOKIE_NAME: z.string().default('friday_csrf_token'),
+  COOKIE_SECURE: z
+    .enum(['true', 'false'])
+    .optional()
+    .transform((v) => (v === undefined ? undefined : v === 'true')),
 
   // Internal AI Microservice URLs
   FRIDAY_AI_SERVICE_URL: z.string().url().default('http://localhost:8001'),
@@ -34,5 +45,13 @@ if (!parsed.success) {
   throw new Error('Environment configuration error');
 }
 
-export const config = parsed.data;
+if (parsed.data.NODE_ENV === 'production' && parsed.data.JWT_SECRET === DEFAULT_DEV_JWT_SECRET) {
+  throw new Error('JWT_SECRET must be overridden in production environment');
+}
+
+export const config = {
+  ...parsed.data,
+  COOKIE_SECURE: parsed.data.COOKIE_SECURE ?? parsed.data.NODE_ENV === 'production',
+  ALLOWED_ORIGINS: parsed.data.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+};
 

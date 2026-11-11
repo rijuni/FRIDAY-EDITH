@@ -1,16 +1,33 @@
 import { logger } from '../utils/logger.js';
 import { config } from '../config/index.js';
 
-export function errorHandler(err, req, res, next) {
-  const statusCode = err.statusCode || 500;
-  const message = statusCode === 500 && config.NODE_ENV === 'production'
+function normalizeError(err) {
+  if (err?.type === 'entity.parse.failed') {
+    return { statusCode: 400, message: 'Invalid JSON request payload' };
+  }
+  if (err?.code === 'P2002') {
+    return { statusCode: 409, message: 'Resource already exists' };
+  }
+  if (err?.code === 'P2025') {
+    return { statusCode: 404, message: 'Requested resource not found' };
+  }
+
+  const statusCode = err?.statusCode || 500;
+  const isProd = config.NODE_ENV === 'production';
+  const message = statusCode === 500 && isProd
     ? 'Internal Server Error'
-    : err.message || 'An unexpected error occurred';
+    : err?.message || 'An unexpected error occurred';
+
+  return { statusCode, message };
+}
+
+export function errorHandler(err, req, res, next) {
+  const { statusCode, message } = normalizeError(err);
 
   logger.error({
     err: {
-      message: err.message,
-      stack: config.NODE_ENV === 'development' ? err.stack : undefined,
+      message: err?.message,
+      code: err?.code,
       statusCode
     },
     req: {
@@ -21,10 +38,10 @@ export function errorHandler(err, req, res, next) {
   }, 'Request error handled');
 
   res.status(statusCode).json({
-    status: 'error',
+    status: statusCode < 500 ? 'fail' : 'error',
     statusCode,
     message,
-    ...(config.NODE_ENV === 'development' && { details: err.details, stack: err.stack })
+    ...(config.NODE_ENV === 'development' && { details: err?.details })
   });
 }
 

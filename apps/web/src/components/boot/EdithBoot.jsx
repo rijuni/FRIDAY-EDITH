@@ -1,33 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { motion } from 'motion/react';
-import { Terminal, ShieldCheck, Cpu, Code2, Sparkles, Layers, ArrowRight } from 'lucide-react';
+import { Terminal, ShieldCheck, Cpu, Code2 } from 'lucide-react';
 import { EdithCore3D } from '../../features/edith/components/EdithCore3D';
+import { useBootLifecycle } from './useBootLifecycle';
 
 export function EdithBoot({ onComplete }) {
-  const [stage, setStage] = useState(0);
+  const { stage, prefersReducedMotion, completeBoot, handleKeyDown } = useBootLifecycle({
+    onComplete,
+    stage1Ms: 500,
+    stage2Ms: 1200,
+    durationMs: 3200
+  });
 
-  useEffect(() => {
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReducedMotion) {
-      onComplete();
-      return;
-    }
-
-    const t1 = setTimeout(() => setStage(1), 500);
-    const t2 = setTimeout(() => setStage(2), 1200);
-    const t3 = setTimeout(() => onComplete(), 3200);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-  }, [onComplete]);
+  if (prefersReducedMotion) {
+    return null;
+  }
 
   return (
     <div
-      onClick={onComplete}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center nebula-canvas starfield text-slate-100 cursor-pointer select-none overflow-hidden font-sans"
+      role="button"
+      tabIndex={0}
+      aria-label="Skip E.D.I.T.H. boot animation"
+      onClick={completeBoot}
+      onKeyDown={handleKeyDown}
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center nebula-canvas starfield text-slate-100 cursor-pointer select-none overflow-hidden font-sans focus:outline-none"
     >
       {/* Background Deep Cyan & Emerald Tactical Aurora Glows */}
       <div className="absolute top-1/6 left-1/4 w-[700px] h-[550px] rounded-full bg-gradient-to-tr from-cyan-600/35 via-blue-600/25 to-emerald-600/20 blur-[150px] pointer-events-none" />

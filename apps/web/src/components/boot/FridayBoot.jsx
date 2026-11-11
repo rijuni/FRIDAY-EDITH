@@ -1,36 +1,29 @@
-import React, { useState, useEffect } from 'react';
+import React from 'react';
 import { motion } from 'motion/react';
 import { ShieldCheck, Cpu } from 'lucide-react';
 import { NebulaOrb } from '../../features/friday/components/NebulaOrb';
+import { useBootLifecycle } from './useBootLifecycle';
 
 export function FridayBoot({ onComplete }) {
-  const [stage, setStage] = useState(0);
+  const { stage, prefersReducedMotion, completeBoot, handleKeyDown } = useBootLifecycle({
+    onComplete,
+    stage1Ms: 600,
+    stage2Ms: 1400,
+    durationMs: 3200
+  });
 
-  useEffect(() => {
-    // Check user preference for reduced motion
-    const prefersReducedMotion = window.matchMedia('(prefers-reduced-motion: reduce)').matches;
-    if (prefersReducedMotion) {
-      onComplete();
-      return;
-    }
-
-    const t1 = setTimeout(() => setStage(1), 600);
-    const t2 = setTimeout(() => setStage(2), 1400);
-    const t3 = setTimeout(() => {
-      onComplete();
-    }, 3200);
-
-    return () => {
-      clearTimeout(t1);
-      clearTimeout(t2);
-      clearTimeout(t3);
-    };
-  }, [onComplete]);
+  if (prefersReducedMotion) {
+    return null;
+  }
 
   return (
     <div
-      onClick={onComplete}
-      className="fixed inset-0 z-50 flex flex-col items-center justify-center nebula-canvas starfield cursor-pointer select-none overflow-hidden"
+      role="button"
+      tabIndex={0}
+      aria-label="Skip F.R.I.D.A.Y. boot animation"
+      onClick={completeBoot}
+      onKeyDown={handleKeyDown}
+      className="fixed inset-0 z-50 flex flex-col items-center justify-center nebula-canvas starfield cursor-pointer select-none overflow-hidden focus:outline-none"
     >
       {/* Background Cosmic Deep Auroras */}
       <motion.div

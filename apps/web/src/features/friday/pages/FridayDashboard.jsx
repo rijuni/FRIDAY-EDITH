@@ -225,9 +225,9 @@ export function FridayDashboard() {
                 <span>Help & Updates</span>
               </button>
               <button
-                onClick={() => {
-                  logout();
-                  navigate('/login');
+                onClick={async () => {
+                  await logout();
+                  navigate('/login', { replace: true });
                 }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-red-500/15 text-slate-400 hover:text-red-300 transition-colors cursor-pointer"
               >
