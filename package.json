@@ -1,0 +1,34 @@
+{
+  "name": "friday-edith-monorepo",
+  "version": "2.1.0",
+  "private": true,
+  "description": "F.R.I.D.A.Y. & E.D.I.T.H. Dual AI Platform Monorepo",
+  "type": "module",
+  "workspaces": [
+    "apps/*",
+    "services/api",
+    "packages/*"
+  ],
+  "scripts": {
+    "dev:web": "npm run dev --workspace=@friday-edith/web",
+    "dev:api": "npm run dev --workspace=@friday-edith/api",
+    "build:web": "npm run build --workspace=@friday-edith/web",
+    "build:api": "npm run build --workspace=@friday-edith/api",
+    "test:web": "npm run test --workspace=@friday-edith/web",
+    "test:api": "npm run test --workspace=@friday-edith/api",
+    "test": "npm run test:api && npm run test:web",
+    "lint": "eslint .",
+    "format": "prettier --write ."
+  },
+  "keywords": [
+    "ai",
+    "assistant",
+    "ide",
+    "autonomous-agent",
+    "friday",
+    "edith",
+    "monorepo"
+  ],
+  "author": "F.R.I.D.A.Y. + E.D.I.T.H. Core Team",
+  "license": "UNLICENSED"
+}
