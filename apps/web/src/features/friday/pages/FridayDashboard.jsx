@@ -8,21 +8,20 @@ import {
   Mic,
   Plus,
   MessageSquare,
-  Bot,
-  User,
-  ExternalLink,
+  Settings,
+  HelpCircle,
+  MoreHorizontal,
   ChevronDown,
-  Search,
-  BookOpen,
-  Brain,
-  Shield,
-  Layers,
-  ArrowRight,
-  Database
+  ExternalLink,
+  Code,
+  Compass,
+  Lightbulb,
+  Zap,
+  ArrowUp
 } from 'lucide-react';
 import { useFridayStore } from '../../../stores/fridayStore';
 import { useAuthStore } from '../../../stores/authStore';
-import { NebulaCore3D } from '../components/NebulaCore3D';
+import { NebulaOrb } from '../components/NebulaOrb';
 
 export function FridayDashboard() {
   const navigate = useNavigate();
@@ -51,9 +50,8 @@ export function FridayDashboard() {
     scrollToBottom();
   }, [messages, streamBuffer]);
 
-  const handleSend = async (e, directText = null) => {
-    e?.preventDefault();
-    const promptText = (directText || input).trim();
+  const handleSend = async (directText = null) => {
+    const promptText = (typeof directText === 'string' ? directText : input).trim();
     if (!promptText || isStreaming) return;
 
     setInput('');
@@ -90,13 +88,12 @@ export function FridayDashboard() {
                 updateStreamBuffer(data.text);
               }
             } catch {
-              // ignore partial frames
+              // ignore partial lines
             }
           }
         }
       }
     } catch {
-      // Offline fallback response demonstration
       updateStreamBuffer(
         `F.R.I.D.A.Y. cognitive core verified. I have synthesized your request: "${promptText}". ` +
         `The platform is actively connected to the secure Node.js persistence API and Python intelligence engine.`
@@ -106,289 +103,276 @@ export function FridayDashboard() {
     }
   };
 
-  const quickPrompts = [
+  const sampleRecentItems = [
+    "Explain the Code",
+    "Kyoto Solo Trip Itinerary",
+    "Podcast Ideas: Sustainable Tech",
+    "Debugging JavaScript snippet",
+    "How to share my car safely"
+  ];
+
+  const quickCards = [
     {
-      icon: Search,
-      title: "Deep Evidence Synthesis",
-      desc: "Decompose complex multi-source research tasks with citation links",
-      prompt: "Perform a deep evidence synthesis on our platform architecture"
+      icon: Code,
+      title: "Explain this Code",
+      sub: '"Can you find the bug in this JavaScript snippet..."',
+      prompt: "Can you analyze and explain the bug in this JavaScript snippet?"
     },
     {
-      icon: Database,
-      title: "Multimodal Data Analysis",
-      desc: "Analyze datasets, calculate margins, and generate structured summaries",
-      prompt: "Analyze the uploaded data structures and check SQLite/MySQL compatibility"
+      icon: Compass,
+      title: "Plan a Project",
+      sub: '"Create a 5-day budget-friendly architecture plan..."',
+      prompt: "Create a 5-day budget-friendly architecture plan for our system."
     },
     {
-      icon: Brain,
-      title: "Memory & Personalization",
-      desc: "Review and inspect long-term contextual preferences and project context",
-      prompt: "What long-term project context and preferences have you recorded?"
-    },
-    {
-      icon: Terminal,
-      title: "Code Task in E.D.I.T.H.",
-      desc: "Switch directly into the autonomous developer IDE with Monaco editor",
-      action: () => navigate('/edith')
+      icon: Lightbulb,
+      title: "Brainstorm ideas",
+      sub: '"I want to start a podcast about sustainable tech..."',
+      prompt: "Brainstorm 5 innovative concepts for sustainable AI technology."
     }
   ];
 
   return (
-    <div className="flex h-screen w-screen nebula-canvas starfield text-slate-100 overflow-hidden relative">
-      {/* LEFT SIDEBAR: Frosted Glass Panel */}
-      <aside className="w-80 glass-panel border-r border-white/10 flex flex-col z-20 shrink-0">
-        {/* Brand Header */}
-        <div className="p-4 border-b border-white/10 flex items-center justify-between">
-          <div className="flex items-center gap-2.5">
-            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 via-indigo-500 to-violet-600 flex items-center justify-center shadow-cyan-glow">
-              <Sparkles className="w-5 h-5 text-white" />
+    <div className="flex h-screen w-screen bg-[#07050d] text-slate-100 overflow-hidden p-3 font-sans selection:bg-purple-600 selection:text-white">
+      {/* Outer macOS-style Window Container */}
+      <div className="flex-1 flex bg-[#0c0915]/90 rounded-2xl border border-white/10 shadow-2xl overflow-hidden relative backdrop-blur-3xl">
+        {/* Subtle Ambient Cosmic Glows Behind Panels */}
+        <div className="absolute top-1/4 left-1/2 -translate-x-1/2 w-[700px] h-[400px] rounded-full bg-gradient-to-tr from-purple-600/20 via-pink-600/15 to-blue-600/10 blur-[140px] pointer-events-none" />
+
+        {/* LEFT FLOATING SIDEBAR */}
+        <aside className="w-64 bg-[#110d1f]/80 border-r border-white/5 flex flex-col p-4 z-20 shrink-0">
+          {/* Logo & Traffic dots */}
+          <div className="flex items-center gap-2 mb-6">
+            <div className="w-3 h-3 rounded-full bg-[#ff5f56]" />
+            <div className="w-3 h-3 rounded-full bg-[#ffbd2e]" />
+            <div className="w-3 h-3 rounded-full bg-[#27c93f]" />
+          </div>
+
+          <div className="flex items-center gap-2.5 mb-5 px-1">
+            <div className="w-8 h-8 rounded-xl bg-gradient-to-tr from-purple-600 via-pink-500 to-indigo-600 flex items-center justify-center shadow-lg shadow-purple-500/30">
+              <Sparkles className="w-4 h-4 text-white" />
             </div>
             <div>
-              <div className="flex items-center gap-1.5">
-                <span className="font-extrabold tracking-[0.2em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-white to-violet-300 text-sm">
-                  F.R.I.D.A.Y.
-                </span>
-                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
-                  v2.1
-                </span>
-              </div>
-              <p className="text-[9px] text-cyan-200/50 font-mono tracking-wider">NEBULA AI WORKSPACE</p>
-            </div>
-          </div>
-        </div>
-
-        {/* New Session Action */}
-        <div className="p-3">
-          <button className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500/20 via-violet-500/20 to-purple-600/20 hover:from-cyan-500/30 hover:to-violet-500/30 border border-cyan-400/30 hover:border-cyan-400 text-xs font-semibold text-cyan-100 transition-all shadow-cyan-glow cursor-pointer">
-            <Plus className="w-4 h-4 text-cyan-300" />
-            <span>New Intelligence Session</span>
-          </button>
-        </div>
-
-        {/* Navigation Categories */}
-        <div className="px-3 py-1 space-y-1">
-          <div className="text-[10px] font-mono tracking-wider text-slate-400 uppercase px-2 mb-1.5">
-            Workspaces & Tools
-          </div>
-          <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5 cursor-pointer transition-colors">
-            <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
-            <span>Knowledge Bases & RAG</span>
-          </div>
-          <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5 cursor-pointer transition-colors">
-            <Brain className="w-3.5 h-3.5 text-violet-400" />
-            <span>Memory Vault</span>
-          </div>
-          <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5 cursor-pointer transition-colors">
-            <Shield className="w-3.5 h-3.5 text-emerald-400" />
-            <span>Security & Audit Logs</span>
-          </div>
-        </div>
-
-        {/* Transcripts History */}
-        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 mt-2">
-          <div className="text-[10px] font-mono tracking-wider text-slate-400 uppercase px-2 mb-1.5">
-            Recent Transcripts
-          </div>
-          {conversations.map((conv) => (
-            <div
-              key={conv.id}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs bg-white/[0.03] border border-white/5 hover:border-cyan-500/40 hover:bg-white/[0.06] text-slate-200 transition-all cursor-pointer group"
-            >
-              <MessageSquare className="w-3.5 h-3.5 text-cyan-400/70 group-hover:text-cyan-300" />
-              <span className="truncate flex-1 font-medium">{conv.title}</span>
-            </div>
-          ))}
-        </div>
-
-        {/* User Status Card */}
-        <div className="p-3 border-t border-white/10 glass-panel flex items-center justify-between">
-          <div className="flex items-center gap-3">
-            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-violet-600 flex items-center justify-center text-xs font-bold text-white shadow-cyan-glow">
-              {user?.name?.charAt(0) || 'U'}
-            </div>
-            <div>
-              <p className="text-xs font-semibold text-slate-200">{user?.name || 'Lead Engineer'}</p>
-              <div className="flex items-center gap-1.5">
-                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
-                <span className="text-[10px] text-emerald-300 font-mono">NEURAL SYNC ACTIVE</span>
-              </div>
-            </div>
-          </div>
-        </div>
-      </aside>
-
-      {/* MAIN VIEWPORT */}
-      <div className="flex-1 flex flex-col h-full min-w-0 z-10">
-        {/* Top Header Bar */}
-        <header className="h-16 border-b border-white/10 px-6 flex items-center justify-between glass-panel shrink-0 z-20">
-          {/* Model Selector Pill */}
-          <div className="flex items-center gap-3">
-            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10">
-              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
-              <span className="text-xs text-slate-400 font-mono">MODEL:</span>
-              <select
-                value={selectedModel}
-                onChange={(e) => setModel(e.target.value)}
-                className="bg-transparent border-0 text-xs font-semibold text-cyan-200 focus:outline-none cursor-pointer"
-              >
-                <option value="claude-3-7-sonnet" className="bg-slate-900 text-white">Claude 3.7 Sonnet (Reasoning)</option>
-                <option value="gpt-4o" className="bg-slate-900 text-white">GPT-4o (Multimodal)</option>
-                <option value="gemini-2-flash" className="bg-slate-900 text-white">Gemini 2.0 Flash</option>
-              </select>
+              <span className="font-bold text-sm tracking-wide text-white">F.R.I.D.A.Y.</span>
+              <p className="text-[10px] text-purple-300/60 font-mono">Nebula Core v2.1</p>
             </div>
           </div>
 
-          {/* THE E.D.I.T.H. SWITCHER BUTTON */}
+          {/* "+ New Chat" Button */}
           <button
-            onClick={() => navigate('/edith')}
-            title="Launch E.D.I.T.H. Developer IDE Workspace"
-            className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600/30 via-cyan-500/20 to-slate-800 border border-cyan-400/40 hover:border-cyan-300 text-xs font-mono text-cyan-200 hover:text-white shadow-cyan-glow transition-all cursor-pointer group"
+            onClick={() => window.location.reload()}
+            className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-600 hover:opacity-95 text-xs font-semibold text-white shadow-lg shadow-purple-600/25 transition-all mb-6 cursor-pointer"
           >
-            <Terminal className="w-4 h-4 text-cyan-300 group-hover:rotate-12 transition-transform" />
-            <span className="font-bold tracking-wider">E.D.I.T.H. // IDE</span>
-            <ExternalLink className="w-3.5 h-3.5 text-cyan-400 opacity-80 group-hover:opacity-100" />
+            <Plus className="w-4 h-4 text-white" />
+            <span>New Chat</span>
           </button>
-        </header>
 
-        {/* Central Chat Stream & Nebula Core */}
-        <div className="flex-1 overflow-y-auto px-6 md:px-16 py-6 space-y-6 min-h-0">
-          {/* Holographic 3D Nebula Core */}
-          <div className="flex flex-col items-center justify-center my-3">
-            <NebulaCore3D isStreaming={isStreaming} />
+          {/* Recent Transcripts */}
+          <div className="flex-1 overflow-y-auto space-y-1 pr-1">
+            <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 px-2 mb-2">
+              <span>Recent</span>
+            </div>
+            {sampleRecentItems.map((item, idx) => (
+              <button
+                key={idx}
+                onClick={() => handleSend(item)}
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-xs text-slate-300 hover:bg-white/[0.06] hover:text-white transition-colors truncate group cursor-pointer"
+              >
+                <MessageSquare className="w-3.5 h-3.5 text-slate-500 group-hover:text-purple-400 shrink-0" />
+                <span className="truncate">{item}</span>
+              </button>
+            ))}
+            <button className="w-full text-left px-3 py-1.5 text-[11px] text-slate-500 hover:text-slate-300 flex items-center gap-1 cursor-pointer">
+              <span>More</span>
+              <ChevronDown className="w-3 h-3" />
+            </button>
           </div>
 
-          {/* Quick Action Suggestion Cards (Shown when conversation is fresh) */}
-          {messages.length <= 1 && (
-            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto my-4">
-              {quickPrompts.map((card, idx) => {
-                const IconComponent = card.icon;
-                return (
-                  <div
-                    key={idx}
-                    onClick={() => card.action ? card.action() : handleSend(null, card.prompt)}
-                    className="glass-panel-card rounded-2xl p-4 cursor-pointer group"
-                  >
-                    <div className="flex items-center gap-3 mb-1.5">
-                      <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-400/20 flex items-center justify-center text-cyan-300 group-hover:scale-110 transition-transform">
-                        <IconComponent className="w-4 h-4" />
-                      </div>
-                      <h3 className="text-xs font-semibold text-slate-100 group-hover:text-cyan-300 transition-colors">
-                        {card.title}
-                      </h3>
-                    </div>
-                    <p className="text-[11px] text-slate-400 leading-snug">
-                      {card.desc}
-                    </p>
-                  </div>
-                );
-              })}
-            </div>
-          )}
-
-          {/* Conversation Messages */}
-          {messages.map((msg) => (
-            <div
-              key={msg.id}
-              className={`flex gap-3 max-w-3xl mx-auto ${
-                msg.role === 'user' ? 'justify-end' : 'justify-start'
-              }`}
-            >
-              {msg.role === 'assistant' && (
-                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 via-indigo-500 to-violet-600 p-[1px] shadow-cyan-glow shrink-0">
-                  <div className="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center text-cyan-300">
-                    <Bot className="w-4 h-4" />
-                  </div>
-                </div>
-              )}
-
-              <div
-                className={`rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${
-                  msg.role === 'user'
-                    ? 'bg-gradient-to-r from-violet-600/40 to-indigo-600/40 border border-violet-400/40 text-white max-w-lg shadow-nebula-glow'
-                    : 'glass-panel text-slate-100 border-white/10 max-w-2xl shadow-glass'
-                }`}
-              >
-                {msg.content}
-              </div>
-
-              {msg.role === 'user' && (
-                <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 shrink-0">
-                  <User className="w-4 h-4" />
-                </div>
-              )}
-            </div>
-          ))}
-
-          {/* Live Streaming Buffer */}
-          {isStreaming && (
-            <div className="flex gap-3 max-w-3xl mx-auto justify-start">
-              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 to-violet-600 p-[1px] shadow-cyan-glow shrink-0 animate-pulse">
-                <div className="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center text-cyan-300">
-                  <Sparkles className="w-4 h-4" />
-                </div>
-              </div>
-              <div className="glass-panel glow-border-cyan rounded-2xl px-5 py-3.5 text-sm text-cyan-100 max-w-2xl">
-                <span className="whitespace-pre-wrap">{streamBuffer || 'Synthesizing neural tokens...'}</span>
-                <span className="inline-block w-2 h-4 ml-1.5 bg-cyan-400 animate-pulse align-middle shadow-cyan-glow" />
-              </div>
-            </div>
-          )}
-
-          <div ref={messagesEndRef} />
-        </div>
-
-        {/* Floating Input Dock */}
-        <div className="p-4 md:px-16 md:pb-6 shrink-0">
-          <form
-            onSubmit={handleSend}
-            className="max-w-3xl mx-auto glass-panel glow-border-cyan rounded-2xl p-2.5 transition-all shadow-glass flex items-end gap-2.5"
-          >
-            {/* Attachment Button */}
-            <button
-              type="button"
-              className="p-2 text-slate-400 hover:text-cyan-300 transition-colors rounded-xl hover:bg-white/5 cursor-pointer"
-              title="Attach Document (PDF, DOCX, CSV)"
-            >
-              <Paperclip className="w-4 h-4" />
+          {/* Bottom Settings & Upgrade Banner */}
+          <div className="pt-4 border-t border-white/5 space-y-2 text-xs text-slate-400">
+            <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/5 text-slate-300 hover:text-white transition-colors cursor-pointer">
+              <Settings className="w-4 h-4 text-slate-500" />
+              <span>Settings</span>
+            </button>
+            <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/5 text-slate-300 hover:text-white transition-colors cursor-pointer">
+              <HelpCircle className="w-4 h-4 text-slate-500" />
+              <span>Help & Updates</span>
             </button>
 
-            {/* Input Textarea */}
-            <textarea
-              value={input}
-              onChange={(e) => setInput(e.target.value)}
-              onKeyDown={(e) => {
-                if (e.key === 'Enter' && !e.shiftKey) {
+            {/* Upgrade / Telemetry Card */}
+            <div className="mt-3 p-3 rounded-2xl bg-white/[0.03] border border-white/5">
+              <div className="flex items-center gap-2 text-purple-300 font-semibold text-xs mb-1">
+                <Zap className="w-3.5 h-3.5 text-purple-400" />
+                <span>Nebula Pro System</span>
+              </div>
+              <p className="text-[10px] text-slate-400 leading-snug">
+                Full reasoning core with isolated Hyper-V runner integration.
+              </p>
+            </div>
+          </div>
+        </aside>
+
+        {/* RIGHT MAIN WORKSPACE */}
+        <div className="flex-1 flex flex-col h-full min-w-0 z-10">
+          {/* Top Navbar */}
+          <header className="h-14 border-b border-white/5 px-6 flex items-center justify-between shrink-0">
+            {/* Model Pill */}
+            <div className="flex items-center gap-2">
+              <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.04] border border-white/10 hover:border-purple-500/40 text-xs text-slate-200 transition-colors cursor-pointer">
+                <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse" />
+                <select
+                  value={selectedModel}
+                  onChange={(e) => setModel(e.target.value)}
+                  className="bg-transparent border-0 text-xs text-slate-200 focus:outline-none cursor-pointer pr-1"
+                >
+                  <option value="claude-3-7-sonnet" className="bg-[#120d24] text-white">F.R.I.D.A.Y. 4.0e (Claude 3.7)</option>
+                  <option value="gpt-4o" className="bg-[#120d24] text-white">GPT-4o Multimodal</option>
+                  <option value="gemini-2-flash" className="bg-[#120d24] text-white">Gemini 2.0 Flash</option>
+                </select>
+                <ChevronDown className="w-3 h-3 text-slate-400" />
+              </div>
+            </div>
+
+            {/* Right Buttons: E.D.I.T.H. Switcher */}
+            <div className="flex items-center gap-3">
+              <button
+                onClick={() => navigate('/edith')}
+                title="Switch to E.D.I.T.H. Developer IDE Workspace"
+                className="flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-gradient-to-r from-purple-600/30 via-indigo-600/30 to-blue-600/30 border border-purple-500/40 hover:border-purple-400 text-xs font-mono text-purple-200 hover:text-white transition-all shadow-lg shadow-purple-500/20 group cursor-pointer"
+              >
+                <Terminal className="w-3.5 h-3.5 text-purple-300 group-hover:rotate-12 transition-transform" />
+                <span className="font-semibold tracking-wide">E.D.I.T.H. // IDE</span>
+                <ExternalLink className="w-3 h-3 text-purple-400" />
+              </button>
+              <button className="w-8 h-8 rounded-full bg-white/[0.04] border border-white/10 flex items-center justify-center text-slate-400 hover:text-white cursor-pointer">
+                <MoreHorizontal className="w-4 h-4" />
+              </button>
+            </div>
+          </header>
+
+          {/* Central Content Area */}
+          <div className="flex-1 overflow-y-auto px-6 py-6 flex flex-col justify-between min-h-0">
+            {/* If no user messages yet: Show the exact Reference Hero Banner! */}
+            {messages.length <= 1 ? (
+              <div className="flex-1 flex flex-col items-center justify-center my-auto max-w-2xl mx-auto w-full text-center">
+                {/* 3D Glowing AI Orb */}
+                <div className="mb-4">
+                  <NebulaOrb isStreaming={isStreaming} size={110} />
+                </div>
+
+                {/* Hero Title & Subtitle */}
+                <h1 className="text-2xl md:text-3xl font-semibold text-white tracking-tight mb-2">
+                  Welcome to your cognitive co-pilot
+                </h1>
+                <p className="text-xs md:text-sm text-slate-400 max-w-md mx-auto mb-8 font-light leading-relaxed">
+                  I am F.R.I.D.A.Y. You can ask me to write, code, plan, or explore any idea.
+                </p>
+
+                {/* 3 Floating Frosted Glass Cards */}
+                <div className="grid grid-cols-1 md:grid-cols-3 gap-3 w-full text-left">
+                  {quickCards.map((card, idx) => {
+                    const Icon = card.icon;
+                    return (
+                      <div
+                        key={idx}
+                        onClick={() => handleSend(card.prompt)}
+                        className="p-4 rounded-2xl bg-white/[0.035] hover:bg-white/[0.07] border border-white/10 hover:border-purple-500/40 transition-all duration-300 cursor-pointer shadow-lg group backdrop-blur-xl"
+                      >
+                        <div className="flex items-center gap-2 mb-2 text-purple-300 group-hover:text-pink-300 transition-colors">
+                          <Icon className="w-4 h-4" />
+                          <h3 className="text-xs font-semibold text-white">{card.title}</h3>
+                        </div>
+                        <p className="text-[11px] text-slate-400 leading-snug line-clamp-2">
+                          {card.sub}
+                        </p>
+                      </div>
+                    );
+                  })}
+                </div>
+              </div>
+            ) : (
+              /* Active Chat Message Stream */
+              <div className="max-w-2xl mx-auto w-full space-y-4 my-auto">
+                {messages.map((msg) => (
+                  <div
+                    key={msg.id}
+                    className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                  >
+                    {msg.role === 'assistant' && (
+                      <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shrink-0 mt-1 shadow-md">
+                        <Sparkles className="w-3.5 h-3.5" />
+                      </div>
+                    )}
+                    <div
+                      className={`rounded-2xl px-4 py-3 text-xs md:text-sm leading-relaxed ${
+                        msg.role === 'user'
+                          ? 'bg-purple-600/40 border border-purple-500/40 text-white max-w-md shadow-lg backdrop-blur-xl'
+                          : 'bg-white/[0.04] border border-white/10 text-slate-200 max-w-xl backdrop-blur-2xl'
+                      }`}
+                    >
+                      {msg.content}
+                    </div>
+                  </div>
+                ))}
+
+                {isStreaming && (
+                  <div className="flex gap-3 justify-start">
+                    <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shrink-0 animate-pulse">
+                      <Sparkles className="w-3.5 h-3.5" />
+                    </div>
+                    <div className="bg-white/[0.04] border border-purple-500/40 rounded-2xl px-4 py-3 text-xs md:text-sm text-purple-200 max-w-xl backdrop-blur-2xl">
+                      <span>{streamBuffer || 'Synthesizing response...'}</span>
+                      <span className="inline-block w-1.5 h-3.5 ml-1 bg-purple-400 animate-pulse align-middle" />
+                    </div>
+                  </div>
+                )}
+                <div ref={messagesEndRef} />
+              </div>
+            )}
+
+            {/* Bottom Floating Input Bar */}
+            <div className="max-w-2xl mx-auto w-full mt-4">
+              <form
+                onSubmit={(e) => {
                   e.preventDefault();
                   handleSend();
-                }
-              }}
-              rows={1}
-              placeholder="Ask F.R.I.D.A.Y. anything or launch a research mission..."
-              className="flex-1 bg-transparent border-0 text-sm text-slate-100 placeholder-slate-500 focus:outline-none resize-none max-h-32 py-1.5 px-2"
-            />
+                }}
+                className="flex items-center gap-2 p-2 rounded-2xl bg-[#140f24]/90 border border-white/10 focus-within:border-purple-500/50 shadow-2xl backdrop-blur-2xl transition-all"
+              >
+                <button
+                  type="button"
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors cursor-pointer"
+                  title="Attach File"
+                >
+                  <Paperclip className="w-4 h-4" />
+                </button>
 
-            {/* Voice Waveform Button */}
-            <button
-              type="button"
-              className="p-2 text-slate-400 hover:text-violet-300 transition-colors rounded-xl hover:bg-white/5 cursor-pointer"
-              title="Voice Dictation"
-            >
-              <Mic className="w-4 h-4" />
-            </button>
+                <input
+                  type="text"
+                  value={input}
+                  onChange={(e) => setInput(e.target.value)}
+                  placeholder="Ask F.R.I.D.A.Y. anything..."
+                  className="flex-1 bg-transparent border-0 text-xs md:text-sm text-white placeholder-slate-500 focus:outline-none px-2"
+                />
 
-            {/* Neon Send Button */}
-            <button
-              type="submit"
-              disabled={!input.trim() || isStreaming}
-              className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-400 via-indigo-500 to-violet-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-95 shadow-cyan-glow transition-all cursor-pointer"
-            >
-              <Send className="w-4 h-4" />
-            </button>
-          </form>
+                <button
+                  type="button"
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/5 transition-colors cursor-pointer"
+                  title="Voice Mode"
+                >
+                  <Mic className="w-4 h-4" />
+                </button>
 
-          <p className="max-w-3xl mx-auto mt-2 text-center text-[10px] text-slate-400 font-mono tracking-wider">
-            F.R.I.D.A.Y. NEBULA CORE v2.1 // POWERED BY REACT 19 & TAILWIND // ZERO DOCKER NATIVE EXECUTION
-          </p>
+                <button
+                  type="submit"
+                  disabled={!input.trim() || isStreaming}
+                  className="p-2 rounded-xl bg-purple-600 hover:bg-purple-500 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-purple-600/30 cursor-pointer"
+                >
+                  <ArrowUp className="w-4 h-4" />
+                </button>
+              </form>
+            </div>
+          </div>
         </div>
       </div>
     </div>
