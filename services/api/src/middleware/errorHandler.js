@@ -27,3 +27,4 @@ export function errorHandler(err, req, res, next) {
     ...(config.NODE_ENV === 'development' && { details: err.details, stack: err.stack })
   });
 }
+

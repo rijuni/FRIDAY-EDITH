@@ -81,3 +81,4 @@ test('Auth API: Registration, Login and Protected Profile flow', async () => {
     server.close();
   }
 });
+

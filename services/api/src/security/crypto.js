@@ -60,3 +60,4 @@ export function generateTokens(payload) {
 export function verifyToken(token) {
   return jwt.verify(token, config.JWT_SECRET);
 }
+

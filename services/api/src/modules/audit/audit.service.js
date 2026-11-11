@@ -1,24 +1,30 @@
+import { prisma } from '../../repositories/prisma.js';
 import { logger } from '../../utils/logger.js';
 
 class AuditService {
-  /**
-   * Records an audit event for sensitive operations.
-   * In Phase 2, this will persist to the Prisma AuditLog table.
-   */
   async logEvent({ action, userId, resourceType, resourceId, details = {}, ip, status = 'SUCCESS' }) {
-    const entry = {
-      timestamp: new Date().toISOString(),
-      action,
-      userId,
-      resourceType,
-      resourceId,
-      details,
-      ip,
-      status
-    };
+    const stringifiedDetails = typeof details === 'string' ? details : JSON.stringify(details);
 
-    logger.info({ audit: entry }, `[AUDIT] ${action} by user ${userId || 'anonymous'} - ${status}`);
-    return entry;
+    try {
+      const entry = await prisma.auditLog.create({
+        data: {
+          action,
+          userId,
+          resourceType,
+          resourceId,
+          status,
+          details: stringifiedDetails,
+          ip
+        }
+      });
+
+      logger.info({ audit: entry }, `[AUDIT] ${action} by user ${userId || 'anonymous'} - ${status}`);
+      return entry;
+    } catch (err) {
+      // In case DB is temporarily down, log to stdout so audit is never silently dropped
+      logger.error({ err, action, userId }, '[AUDIT FALLBACK LOG]');
+      return { action, userId, status, details: stringifiedDetails };
+    }
   }
 }
 

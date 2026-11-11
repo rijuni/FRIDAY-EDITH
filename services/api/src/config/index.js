@@ -35,3 +35,4 @@ if (!parsed.success) {
 }
 
 export const config = parsed.data;
+

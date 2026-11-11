@@ -26,3 +26,4 @@ const loginSchema = {
 authRouter.post('/register', authLimiter, validate(registerSchema), authController.register);
 authRouter.post('/login', authLimiter, validate(loginSchema), authController.login);
 authRouter.get('/me', authenticate, authController.getMe);
+

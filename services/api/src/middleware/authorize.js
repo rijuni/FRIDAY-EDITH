@@ -24,3 +24,4 @@ export function authorize(...allowedRoles) {
     next();
   };
 }
+

@@ -18,3 +18,4 @@ test('GET /v1/health returns 200 and healthy status', async () => {
     server.close();
   }
 });
+
