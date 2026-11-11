@@ -20,6 +20,7 @@ test('Auth API: Registration, Login and Protected Profile flow', async () => {
   const server = app.listen(0);
   const port = server.address().port;
   const baseUrl = `http://localhost:${port}/v1/auth`;
+  const uniqueEmail = `tony_${Date.now()}@stark.corp`;
 
   try {
     // 1. Validation failure: Short password
@@ -27,7 +28,7 @@ test('Auth API: Registration, Login and Protected Profile flow', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: 'dev@friday.ai',
+        email: uniqueEmail,
         password: 'short',
         name: 'Tony Stark'
       })
@@ -39,7 +40,7 @@ test('Auth API: Registration, Login and Protected Profile flow', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: 'tony@stark.corp',
+        email: uniqueEmail,
         password: 'QuantumEncryption2026!',
         name: 'Tony Stark',
         role: 'DEVELOPER'
@@ -48,7 +49,7 @@ test('Auth API: Registration, Login and Protected Profile flow', async () => {
     assert.equal(regRes.status, 201);
     const regData = await regRes.json();
     assert.equal(regData.status, 'success');
-    assert.equal(regData.data.user.email, 'tony@stark.corp');
+    assert.equal(regData.data.user.email, uniqueEmail);
     assert.ok(regData.data.tokens.accessToken);
 
     // 3. Successful Login
@@ -56,7 +57,7 @@ test('Auth API: Registration, Login and Protected Profile flow', async () => {
       method: 'POST',
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({
-        email: 'tony@stark.corp',
+        email: uniqueEmail,
         password: 'QuantumEncryption2026!'
       })
     });
@@ -71,7 +72,7 @@ test('Auth API: Registration, Login and Protected Profile flow', async () => {
     });
     assert.equal(meRes.status, 200);
     const meData = await meRes.json();
-    assert.equal(meData.data.user.email, 'tony@stark.corp');
+    assert.equal(meData.data.user.email, uniqueEmail);
     assert.equal(meData.data.user.role, 'DEVELOPER');
 
     // 5. Unauthenticated request rejected
@@ -81,4 +82,3 @@ test('Auth API: Registration, Login and Protected Profile flow', async () => {
     server.close();
   }
 });
-

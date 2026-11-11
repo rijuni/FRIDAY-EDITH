@@ -6,6 +6,7 @@ import { apiLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/v1/health.routes.js';
 import { authRouter } from './routes/v1/auth.routes.js';
+import { fridayRouter } from './routes/v1/friday.routes.js';
 
 export const app = express();
 
@@ -26,6 +27,7 @@ app.use('/v1', apiLimiter);
 // API Routes
 app.use('/v1/health', healthRouter);
 app.use('/v1/auth', authRouter);
+app.use('/v1/friday', fridayRouter);
 
 // 404 Handler
 app.use((req, res) => {
@@ -38,4 +40,3 @@ app.use((req, res) => {
 
 // Centralized Error Handler
 app.use(errorHandler);
-
