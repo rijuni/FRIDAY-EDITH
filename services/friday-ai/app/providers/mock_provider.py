@@ -62,3 +62,4 @@ class MockProvider(BaseProvider):
     def count_tokens(self, text: str) -> int:
         # Rule of thumb: ~4 characters per token
         return max(1, len(text) // 4)
+

@@ -12,3 +12,4 @@ def setup_logging():
     return logging.getLogger("friday_ai")
 
 logger = setup_logging()
+

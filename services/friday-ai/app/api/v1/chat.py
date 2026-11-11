@@ -50,3 +50,4 @@ async def stream_chat(req: ChatStreamRequest):
             }
 
     return EventSourceResponse(event_generator())
+

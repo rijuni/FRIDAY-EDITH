@@ -31,3 +31,4 @@ fridayRouter.post('/conversations', validate(createConvSchema), fridayController
 fridayRouter.get('/conversations', fridayController.listConversations);
 fridayRouter.get('/conversations/:id', fridayController.getConversation);
 fridayRouter.post('/conversations/:id/messages', validate(sendMessageSchema), fridayController.sendMessage);
+

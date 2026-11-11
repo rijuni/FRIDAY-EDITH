@@ -25,3 +25,4 @@ async def readiness_check():
             "retriever": "online"
         }
     }
+

@@ -37,3 +37,4 @@ async def friday_exception_handler(request: Request, exc: FridayAIException):
             "message": exc.message
         }
     )
+

@@ -64,3 +64,4 @@ if __name__ == "__main__":
     test_context_window_compaction()
     print("✅ test_context_window_compaction passed")
     print("🎉 All F.R.I.D.A.Y. AI Python tests passed successfully!")
+

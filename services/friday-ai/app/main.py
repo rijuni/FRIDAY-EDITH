@@ -39,3 +39,4 @@ app.add_exception_handler(FridayAIException, friday_exception_handler)
 app.include_router(health_router, prefix="/v1/health", tags=["Health"])
 app.include_router(chat_router, prefix="/v1/chat", tags=["Chat"])
 app.include_router(documents_router, prefix="/v1/documents", tags=["Documents"])
+

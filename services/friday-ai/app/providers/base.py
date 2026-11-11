@@ -28,3 +28,4 @@ class BaseProvider(ABC):
     def count_tokens(self, text: str) -> int:
         """Estimates token usage for context budgeting."""
         pass
+

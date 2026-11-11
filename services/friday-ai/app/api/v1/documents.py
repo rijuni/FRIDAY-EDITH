@@ -19,3 +19,4 @@ async def parse_document(file: UploadFile = File(...)):
         "status": "success",
         "data": parsed
     }
+
