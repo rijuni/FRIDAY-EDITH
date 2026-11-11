@@ -147,3 +147,4 @@ export function NebulaOrb({ isStreaming = false, size = 120 }) {
     </div>
   );
 }
+
