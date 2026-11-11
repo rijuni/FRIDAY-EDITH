@@ -77,3 +77,4 @@ test('Database Persistence: F.R.I.D.A.Y. and E.D.I.T.H. data models', async () =
   const checkConv = await prisma.conversation.findUnique({ where: { id: conversation.id } });
   assert.equal(checkConv, null, 'Cascade delete should remove associated conversation');
 });
+

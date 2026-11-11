@@ -48,3 +48,4 @@ if (errors.length > 0) {
 } else {
   console.log('✅ MySQL 8.4+ compatibility check passed successfully!');
 }
+

@@ -27,3 +27,4 @@ export function getPrismaClient() {
 }
 
 export const prisma = getPrismaClient();
+

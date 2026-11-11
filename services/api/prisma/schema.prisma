@@ -258,3 +258,4 @@ model CommandApproval {
   @@index([taskId])
   @@index([status])
 }
+
