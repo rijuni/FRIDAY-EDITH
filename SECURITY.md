@@ -13,3 +13,4 @@
    - Frontend client bundles (`apps/web`) never contain secret environment variables or direct database access.
 4. **Vulnerability Reporting:**
    - Report security vulnerabilities privately to the repository security maintainers.
+

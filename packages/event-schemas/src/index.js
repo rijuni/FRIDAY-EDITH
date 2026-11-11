@@ -21,3 +21,4 @@ export const RunnerEventTypes = {
   DIFF_READY: 'diff_ready',
   STATUS: 'status'
 };
+

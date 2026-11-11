@@ -50,3 +50,4 @@ npm run dev:web    # Starts React + Vite frontend (Port 5173)
 ```
 
 See [docs/architecture/](file:///m:/Friday-Edith/docs/architecture/) for detailed design specs.
+
