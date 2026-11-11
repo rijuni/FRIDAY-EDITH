@@ -7,6 +7,7 @@ import { errorHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/v1/health.routes.js';
 import { authRouter } from './routes/v1/auth.routes.js';
 import { fridayRouter } from './routes/v1/friday.routes.js';
+import { edithRouter } from './routes/v1/edith.routes.js';
 
 export const app = express();
 
@@ -28,6 +29,7 @@ app.use('/v1', apiLimiter);
 app.use('/v1/health', healthRouter);
 app.use('/v1/auth', authRouter);
 app.use('/v1/friday', fridayRouter);
+app.use('/v1/edith', edithRouter);
 
 // 404 Handler
 app.use((req, res) => {

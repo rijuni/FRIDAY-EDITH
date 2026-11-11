@@ -1,12 +1,13 @@
 import React, { useState } from 'react';
-import { Routes, Route, Navigate, useLocation, useSearchParams } from 'react-router-dom';
+import { Routes, Route, Navigate, useSearchParams } from 'react-router-dom';
 import { FridayBoot } from './components/boot/FridayBoot';
+import { EdithBoot } from './components/boot/EdithBoot';
 import { FridayDashboard } from './features/friday/pages/FridayDashboard';
 import { EdithPlaceholder } from './features/edith/pages/EdithPlaceholder';
 import { Login } from './features/auth/pages/Login';
 import { useAuthStore } from './stores/authStore';
 
-function ProtectedRoute({ children, bootCompleted, setBootCompleted }) {
+function ProtectedRoute({ children, isEdith = false, bootCompleted, setBootCompleted }) {
   const { isAuthenticated } = useAuthStore();
   const [searchParams] = useSearchParams();
   const skipBootParam = searchParams.get('noboot') === 'true';
@@ -18,14 +19,19 @@ function ProtectedRoute({ children, bootCompleted, setBootCompleted }) {
   const shouldShowBoot = !bootCompleted && !skipBootParam;
 
   if (shouldShowBoot) {
-    return <FridayBoot onComplete={() => setBootCompleted(true)} />;
+    return isEdith ? (
+      <EdithBoot onComplete={() => setBootCompleted(true)} />
+    ) : (
+      <FridayBoot onComplete={() => setBootCompleted(true)} />
+    );
   }
 
   return children;
 }
 
 export default function App() {
-  const [bootCompleted, setBootCompleted] = useState(false);
+  const [fridayBootCompleted, setFridayBootCompleted] = useState(false);
+  const [edithBootCompleted, setEdithBootCompleted] = useState(false);
   const { isAuthenticated } = useAuthStore();
 
   return (
@@ -43,31 +49,38 @@ export default function App() {
           isAuthenticated ? (
             <Navigate to="/friday" replace />
           ) : (
-            <Login onLoginSuccess={() => setBootCompleted(false)} />
+            <Login
+              onLoginSuccess={() => {
+                setFridayBootCompleted(false);
+                setEdithBootCompleted(false);
+              }}
+            />
           )
         }
       />
 
-      {/* F.R.I.D.A.Y. Dashboard: Protected by Auth & Shows Boot Animation first */}
+      {/* F.R.I.D.A.Y. Dashboard: Protected by Auth & Shows Friday 3D Plasma Orb Boot Animation */}
       <Route
         path="/friday"
         element={
           <ProtectedRoute
-            bootCompleted={bootCompleted}
-            setBootCompleted={setBootCompleted}
+            isEdith={false}
+            bootCompleted={fridayBootCompleted}
+            setBootCompleted={setFridayBootCompleted}
           >
             <FridayDashboard />
           </ProtectedRoute>
         }
       />
 
-      {/* E.D.I.T.H. Developer IDE Workspace */}
+      {/* E.D.I.T.H. Developer IDE Workspace: Shows Tactical Stark HUD Boot Animation */}
       <Route
         path="/edith"
         element={
           <ProtectedRoute
-            bootCompleted={bootCompleted}
-            setBootCompleted={setBootCompleted}
+            isEdith={true}
+            bootCompleted={edithBootCompleted}
+            setBootCompleted={setEdithBootCompleted}
           >
             <EdithPlaceholder />
           </ProtectedRoute>
