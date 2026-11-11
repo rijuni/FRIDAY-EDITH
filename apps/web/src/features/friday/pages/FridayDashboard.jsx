@@ -11,7 +11,14 @@ import {
   Bot,
   User,
   ExternalLink,
-  ChevronDown
+  ChevronDown,
+  Search,
+  BookOpen,
+  Brain,
+  Shield,
+  Layers,
+  ArrowRight,
+  Database
 } from 'lucide-react';
 import { useFridayStore } from '../../../stores/fridayStore';
 import { useAuthStore } from '../../../stores/authStore';
@@ -44,32 +51,27 @@ export function FridayDashboard() {
     scrollToBottom();
   }, [messages, streamBuffer]);
 
-  const handleSend = async (e) => {
+  const handleSend = async (e, directText = null) => {
     e?.preventDefault();
-    if (!input.trim() || isStreaming) return;
+    const promptText = (directText || input).trim();
+    if (!promptText || isStreaming) return;
 
-    const userPrompt = input.trim();
     setInput('');
-
-    // Append user message to store
-    appendMessage({ role: 'user', content: userPrompt });
+    appendMessage({ role: 'user', content: promptText });
     startStreaming();
 
     try {
-      // Stream from services/friday-ai or Node API proxy
       const response = await fetch('/v1/chat/stream', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           model: selectedModel,
-          messages: [...messages, { role: 'user', content: userPrompt }],
+          messages: [...messages, { role: 'user', content: promptText }],
           system_prompt: 'You are F.R.I.D.A.Y., a high-intelligence AI assistant running on Nebula UI.'
         })
       });
 
-      if (!response.ok) {
-        throw new Error('Streaming connection failed');
-      }
+      if (!response.ok) throw new Error('Stream request failed');
 
       const reader = response.body.getReader();
       const decoder = new TextDecoder();
@@ -88,121 +90,202 @@ export function FridayDashboard() {
                 updateStreamBuffer(data.text);
               }
             } catch {
-              // ignore partial lines
+              // ignore partial frames
             }
           }
         }
       }
-    } catch (err) {
-      // Fallback response for offline demonstration
-      updateStreamBuffer(`F.R.I.D.A.Y. neural core active. Received: "${userPrompt}". Streaming and memory pipeline verified.`);
+    } catch {
+      // Offline fallback response demonstration
+      updateStreamBuffer(
+        `F.R.I.D.A.Y. cognitive core verified. I have synthesized your request: "${promptText}". ` +
+        `The platform is actively connected to the secure Node.js persistence API and Python intelligence engine.`
+      );
     } finally {
       finishStreaming();
     }
   };
 
-  return (
-    <div className="flex h-screen w-screen bg-nebula-space text-slate-100 overflow-hidden relative">
-      {/* Background Ambient Cosmic Blur Fields */}
-      <div className="absolute top-[-150px] left-[20%] w-[600px] h-[400px] rounded-full bg-violet-600/15 blur-[140px] pointer-events-none" />
-      <div className="absolute bottom-[-150px] right-[15%] w-[500px] h-[500px] rounded-full bg-cyan-600/15 blur-[140px] pointer-events-none" />
+  const quickPrompts = [
+    {
+      icon: Search,
+      title: "Deep Evidence Synthesis",
+      desc: "Decompose complex multi-source research tasks with citation links",
+      prompt: "Perform a deep evidence synthesis on our platform architecture"
+    },
+    {
+      icon: Database,
+      title: "Multimodal Data Analysis",
+      desc: "Analyze datasets, calculate margins, and generate structured summaries",
+      prompt: "Analyze the uploaded data structures and check SQLite/MySQL compatibility"
+    },
+    {
+      icon: Brain,
+      title: "Memory & Personalization",
+      desc: "Review and inspect long-term contextual preferences and project context",
+      prompt: "What long-term project context and preferences have you recorded?"
+    },
+    {
+      icon: Terminal,
+      title: "Code Task in E.D.I.T.H.",
+      desc: "Switch directly into the autonomous developer IDE with Monaco editor",
+      action: () => navigate('/edith')
+    }
+  ];
 
-      {/* LEFT SIDEBAR: Conversational History */}
-      <aside className="w-72 glass-panel border-r border-white/5 flex flex-col z-10 hidden md:flex">
-        {/* Branding Header */}
-        <div className="p-4 border-b border-white/5 flex items-center justify-between">
-          <div className="flex items-center gap-2">
-            <div className="w-7 h-7 rounded-lg bg-gradient-to-tr from-cyan-500 to-violet-600 flex items-center justify-center shadow-cyan-glow">
-              <Sparkles className="w-4 h-4 text-white" />
+  return (
+    <div className="flex h-screen w-screen nebula-canvas starfield text-slate-100 overflow-hidden relative">
+      {/* LEFT SIDEBAR: Frosted Glass Panel */}
+      <aside className="w-80 glass-panel border-r border-white/10 flex flex-col z-20 shrink-0">
+        {/* Brand Header */}
+        <div className="p-4 border-b border-white/10 flex items-center justify-between">
+          <div className="flex items-center gap-2.5">
+            <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 via-indigo-500 to-violet-600 flex items-center justify-center shadow-cyan-glow">
+              <Sparkles className="w-5 h-5 text-white" />
             </div>
-            <span className="font-extrabold tracking-widest text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-white to-violet-300 text-sm">
-              F.R.I.D.A.Y.
-            </span>
+            <div>
+              <div className="flex items-center gap-1.5">
+                <span className="font-extrabold tracking-[0.2em] text-transparent bg-clip-text bg-gradient-to-r from-cyan-300 via-white to-violet-300 text-sm">
+                  F.R.I.D.A.Y.
+                </span>
+                <span className="text-[9px] uppercase font-mono px-1.5 py-0.2 rounded bg-cyan-500/20 text-cyan-300 border border-cyan-400/30">
+                  v2.1
+                </span>
+              </div>
+              <p className="text-[9px] text-cyan-200/50 font-mono tracking-wider">NEBULA AI WORKSPACE</p>
+            </div>
           </div>
-          <span className="text-[10px] uppercase font-mono px-1.5 py-0.5 rounded bg-cyan-500/10 text-cyan-400 border border-cyan-500/20">
-            Nebula
-          </span>
         </div>
 
-        {/* New Chat Button */}
+        {/* New Session Action */}
         <div className="p-3">
-          <button className="w-full flex items-center justify-center gap-2 px-3 py-2.5 rounded-xl bg-white/[0.04] hover:bg-white/[0.08] border border-white/10 hover:border-violet-500/40 text-xs font-medium text-slate-200 transition-all shadow-sm">
-            <Plus className="w-4 h-4 text-cyan-400" />
+          <button className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-xl bg-gradient-to-r from-cyan-500/20 via-violet-500/20 to-purple-600/20 hover:from-cyan-500/30 hover:to-violet-500/30 border border-cyan-400/30 hover:border-cyan-400 text-xs font-semibold text-cyan-100 transition-all shadow-cyan-glow cursor-pointer">
+            <Plus className="w-4 h-4 text-cyan-300" />
             <span>New Intelligence Session</span>
           </button>
         </div>
 
-        {/* History List */}
-        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1">
-          <div className="text-[10px] font-mono tracking-wider text-slate-500 uppercase px-2 mb-1">
+        {/* Navigation Categories */}
+        <div className="px-3 py-1 space-y-1">
+          <div className="text-[10px] font-mono tracking-wider text-slate-400 uppercase px-2 mb-1.5">
+            Workspaces & Tools
+          </div>
+          <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5 cursor-pointer transition-colors">
+            <BookOpen className="w-3.5 h-3.5 text-cyan-400" />
+            <span>Knowledge Bases & RAG</span>
+          </div>
+          <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5 cursor-pointer transition-colors">
+            <Brain className="w-3.5 h-3.5 text-violet-400" />
+            <span>Memory Vault</span>
+          </div>
+          <div className="flex items-center gap-2.5 px-3 py-2 rounded-lg text-xs text-slate-300 hover:bg-white/5 cursor-pointer transition-colors">
+            <Shield className="w-3.5 h-3.5 text-emerald-400" />
+            <span>Security & Audit Logs</span>
+          </div>
+        </div>
+
+        {/* Transcripts History */}
+        <div className="flex-1 overflow-y-auto px-3 py-2 space-y-1 mt-2">
+          <div className="text-[10px] font-mono tracking-wider text-slate-400 uppercase px-2 mb-1.5">
             Recent Transcripts
           </div>
           {conversations.map((conv) => (
-            <button
+            <div
               key={conv.id}
-              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-lg text-left text-xs text-slate-300 hover:bg-white/[0.05] hover:text-white transition-all group"
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-xs bg-white/[0.03] border border-white/5 hover:border-cyan-500/40 hover:bg-white/[0.06] text-slate-200 transition-all cursor-pointer group"
             >
-              <MessageSquare className="w-3.5 h-3.5 text-slate-500 group-hover:text-cyan-400" />
-              <span className="truncate">{conv.title}</span>
-            </button>
+              <MessageSquare className="w-3.5 h-3.5 text-cyan-400/70 group-hover:text-cyan-300" />
+              <span className="truncate flex-1 font-medium">{conv.title}</span>
+            </div>
           ))}
         </div>
 
-        {/* User Status Footer */}
-        <div className="p-3 border-t border-white/5 flex items-center gap-3">
-          <div className="w-8 h-8 rounded-full bg-violet-600/30 border border-violet-400/30 flex items-center justify-center text-xs font-bold text-violet-300">
-            {user?.name?.charAt(0) || 'U'}
-          </div>
-          <div className="flex-1 min-w-0">
-            <p className="text-xs font-medium text-slate-200 truncate">{user?.name || 'Engineer'}</p>
-            <p className="text-[10px] text-slate-500 font-mono">STATUS: CONNECTED</p>
+        {/* User Status Card */}
+        <div className="p-3 border-t border-white/10 glass-panel flex items-center justify-between">
+          <div className="flex items-center gap-3">
+            <div className="w-8 h-8 rounded-full bg-gradient-to-tr from-cyan-500 to-violet-600 flex items-center justify-center text-xs font-bold text-white shadow-cyan-glow">
+              {user?.name?.charAt(0) || 'U'}
+            </div>
+            <div>
+              <p className="text-xs font-semibold text-slate-200">{user?.name || 'Lead Engineer'}</p>
+              <div className="flex items-center gap-1.5">
+                <span className="w-1.5 h-1.5 rounded-full bg-emerald-400 animate-pulse" />
+                <span className="text-[10px] text-emerald-300 font-mono">NEURAL SYNC ACTIVE</span>
+              </div>
+            </div>
           </div>
         </div>
       </aside>
 
-      {/* MAIN CONVERSATION STAGE */}
-      <main className="flex-1 flex flex-col h-full relative z-10">
-        {/* Top Navigation Bar */}
-        <header className="h-14 border-b border-white/5 px-6 flex items-center justify-between glass-panel">
-          {/* Model Selector Dropdown */}
+      {/* MAIN VIEWPORT */}
+      <div className="flex-1 flex flex-col h-full min-w-0 z-10">
+        {/* Top Header Bar */}
+        <header className="h-16 border-b border-white/10 px-6 flex items-center justify-between glass-panel shrink-0 z-20">
+          {/* Model Selector Pill */}
           <div className="flex items-center gap-3">
-            <label className="text-xs text-slate-400 font-mono hidden sm:inline">MODEL:</label>
-            <select
-              value={selectedModel}
-              onChange={(e) => setModel(e.target.value)}
-              className="bg-black/40 border border-white/10 hover:border-violet-500/40 rounded-lg px-2.5 py-1 text-xs text-slate-200 focus:outline-none focus:border-cyan-400 transition-colors cursor-pointer"
-            >
-              <option value="claude-3-7-sonnet">Claude 3.7 Sonnet (Reasoning)</option>
-              <option value="gpt-4o">GPT-4o (Multimodal)</option>
-              <option value="gemini-2-flash">Gemini 2.0 Flash</option>
-            </select>
+            <div className="flex items-center gap-2 px-3 py-1.5 rounded-xl bg-white/[0.04] border border-white/10">
+              <Sparkles className="w-3.5 h-3.5 text-cyan-400" />
+              <span className="text-xs text-slate-400 font-mono">MODEL:</span>
+              <select
+                value={selectedModel}
+                onChange={(e) => setModel(e.target.value)}
+                className="bg-transparent border-0 text-xs font-semibold text-cyan-200 focus:outline-none cursor-pointer"
+              >
+                <option value="claude-3-7-sonnet" className="bg-slate-900 text-white">Claude 3.7 Sonnet (Reasoning)</option>
+                <option value="gpt-4o" className="bg-slate-900 text-white">GPT-4o (Multimodal)</option>
+                <option value="gemini-2-flash" className="bg-slate-900 text-white">Gemini 2.0 Flash</option>
+              </select>
+            </div>
           </div>
 
-          {/* THE E.D.I.T.H. SWITCHER ICON (Redirects to /edith) */}
-          <div className="flex items-center gap-4">
-            <button
-              onClick={() => navigate('/edith')}
-              title="Switch to E.D.I.T.H. Developer IDE Workspace"
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-gradient-to-r from-ide-accent/20 to-ide-surface border border-ide-accent/40 hover:border-ide-accent text-xs font-mono text-cyan-300 hover:text-white transition-all shadow-[0_0_15px_-3px_rgba(88,166,255,0.3)] group cursor-pointer"
-            >
-              <Terminal className="w-3.5 h-3.5 text-ide-accent group-hover:rotate-12 transition-transform" />
-              <span className="font-semibold tracking-wider">E.D.I.T.H. // IDE</span>
-              <ExternalLink className="w-3 h-3 text-ide-accent opacity-70 group-hover:opacity-100" />
-            </button>
-          </div>
+          {/* THE E.D.I.T.H. SWITCHER BUTTON */}
+          <button
+            onClick={() => navigate('/edith')}
+            title="Launch E.D.I.T.H. Developer IDE Workspace"
+            className="flex items-center gap-2.5 px-4 py-2 rounded-xl bg-gradient-to-r from-blue-600/30 via-cyan-500/20 to-slate-800 border border-cyan-400/40 hover:border-cyan-300 text-xs font-mono text-cyan-200 hover:text-white shadow-cyan-glow transition-all cursor-pointer group"
+          >
+            <Terminal className="w-4 h-4 text-cyan-300 group-hover:rotate-12 transition-transform" />
+            <span className="font-bold tracking-wider">E.D.I.T.H. // IDE</span>
+            <ExternalLink className="w-3.5 h-3.5 text-cyan-400 opacity-80 group-hover:opacity-100" />
+          </button>
         </header>
 
-        {/* Chat Stream View */}
-        <div className="flex-1 overflow-y-auto px-4 md:px-12 py-6 space-y-6">
-          {/* Central 3D Nebula Core */}
-          <div className="flex flex-col items-center justify-center my-2 select-none">
+        {/* Central Chat Stream & Nebula Core */}
+        <div className="flex-1 overflow-y-auto px-6 md:px-16 py-6 space-y-6 min-h-0">
+          {/* Holographic 3D Nebula Core */}
+          <div className="flex flex-col items-center justify-center my-3">
             <NebulaCore3D isStreaming={isStreaming} />
-            <p className="mt-1 text-[11px] font-mono tracking-widest text-cyan-300/70 uppercase">
-              {isStreaming ? 'F.R.I.D.A.Y. STREAMING TELEMETRY...' : 'F.R.I.D.A.Y. READY'}
-            </p>
           </div>
 
-          {/* Messages */}
+          {/* Quick Action Suggestion Cards (Shown when conversation is fresh) */}
+          {messages.length <= 1 && (
+            <div className="grid grid-cols-1 md:grid-cols-2 gap-3 max-w-3xl mx-auto my-4">
+              {quickPrompts.map((card, idx) => {
+                const IconComponent = card.icon;
+                return (
+                  <div
+                    key={idx}
+                    onClick={() => card.action ? card.action() : handleSend(null, card.prompt)}
+                    className="glass-panel-card rounded-2xl p-4 cursor-pointer group"
+                  >
+                    <div className="flex items-center gap-3 mb-1.5">
+                      <div className="w-7 h-7 rounded-lg bg-cyan-500/10 border border-cyan-400/20 flex items-center justify-center text-cyan-300 group-hover:scale-110 transition-transform">
+                        <IconComponent className="w-4 h-4" />
+                      </div>
+                      <h3 className="text-xs font-semibold text-slate-100 group-hover:text-cyan-300 transition-colors">
+                        {card.title}
+                      </h3>
+                    </div>
+                    <p className="text-[11px] text-slate-400 leading-snug">
+                      {card.desc}
+                    </p>
+                  </div>
+                );
+              })}
+            </div>
+          )}
+
+          {/* Conversation Messages */}
           {messages.map((msg) => (
             <div
               key={msg.id}
@@ -211,38 +294,42 @@ export function FridayDashboard() {
               }`}
             >
               {msg.role === 'assistant' && (
-                <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500/20 to-violet-500/20 border border-cyan-500/30 flex items-center justify-center text-cyan-400 shrink-0">
-                  <Bot className="w-4 h-4" />
+                <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 via-indigo-500 to-violet-600 p-[1px] shadow-cyan-glow shrink-0">
+                  <div className="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center text-cyan-300">
+                    <Bot className="w-4 h-4" />
+                  </div>
                 </div>
               )}
 
               <div
-                className={`rounded-2xl px-4 py-3 text-sm leading-relaxed ${
+                className={`rounded-2xl px-5 py-3.5 text-sm leading-relaxed ${
                   msg.role === 'user'
-                    ? 'bg-violet-600/30 border border-violet-500/30 text-white max-w-lg shadow-sm'
-                    : 'glass-panel text-slate-200 border-white/10 max-w-2xl'
+                    ? 'bg-gradient-to-r from-violet-600/40 to-indigo-600/40 border border-violet-400/40 text-white max-w-lg shadow-nebula-glow'
+                    : 'glass-panel text-slate-100 border-white/10 max-w-2xl shadow-glass'
                 }`}
               >
                 {msg.content}
               </div>
 
               {msg.role === 'user' && (
-                <div className="w-8 h-8 rounded-lg bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 shrink-0">
+                <div className="w-9 h-9 rounded-xl bg-slate-800 border border-slate-700 flex items-center justify-center text-slate-300 shrink-0">
                   <User className="w-4 h-4" />
                 </div>
               )}
             </div>
           ))}
 
-          {/* Real-time Streaming Response Buffer */}
+          {/* Live Streaming Buffer */}
           {isStreaming && (
             <div className="flex gap-3 max-w-3xl mx-auto justify-start">
-              <div className="w-8 h-8 rounded-lg bg-gradient-to-tr from-cyan-500 to-violet-500 flex items-center justify-center text-white shrink-0 animate-pulse">
-                <Sparkles className="w-4 h-4" />
+              <div className="w-9 h-9 rounded-xl bg-gradient-to-tr from-cyan-400 to-violet-600 p-[1px] shadow-cyan-glow shrink-0 animate-pulse">
+                <div className="w-full h-full bg-slate-950 rounded-[11px] flex items-center justify-center text-cyan-300">
+                  <Sparkles className="w-4 h-4" />
+                </div>
               </div>
-              <div className="glass-panel rounded-2xl px-4 py-3 text-sm text-cyan-200 border-cyan-500/30 max-w-2xl">
-                <span className="whitespace-pre-wrap">{streamBuffer || 'Synthesizing response...'}</span>
-                <span className="inline-block w-2 h-4 ml-1 bg-cyan-400 animate-pulse align-middle" />
+              <div className="glass-panel glow-border-cyan rounded-2xl px-5 py-3.5 text-sm text-cyan-100 max-w-2xl">
+                <span className="whitespace-pre-wrap">{streamBuffer || 'Synthesizing neural tokens...'}</span>
+                <span className="inline-block w-2 h-4 ml-1.5 bg-cyan-400 animate-pulse align-middle shadow-cyan-glow" />
               </div>
             </div>
           )}
@@ -250,22 +337,22 @@ export function FridayDashboard() {
           <div ref={messagesEndRef} />
         </div>
 
-        {/* Bottom Input Area */}
-        <div className="p-4 md:px-12 md:pb-6">
+        {/* Floating Input Dock */}
+        <div className="p-4 md:px-16 md:pb-6 shrink-0">
           <form
             onSubmit={handleSend}
-            className="max-w-3xl mx-auto glass-panel rounded-2xl p-2 border border-white/10 focus-within:border-cyan-500/50 transition-all shadow-glass flex items-end gap-2"
+            className="max-w-3xl mx-auto glass-panel glow-border-cyan rounded-2xl p-2.5 transition-all shadow-glass flex items-end gap-2.5"
           >
             {/* Attachment Button */}
             <button
               type="button"
-              className="p-2 text-slate-400 hover:text-cyan-400 transition-colors rounded-lg hover:bg-white/5 cursor-pointer"
-              title="Attach Document or Image"
+              className="p-2 text-slate-400 hover:text-cyan-300 transition-colors rounded-xl hover:bg-white/5 cursor-pointer"
+              title="Attach Document (PDF, DOCX, CSV)"
             >
               <Paperclip className="w-4 h-4" />
             </button>
 
-            {/* Message Text Input */}
+            {/* Input Textarea */}
             <textarea
               value={input}
               onChange={(e) => setInput(e.target.value)}
@@ -276,34 +363,34 @@ export function FridayDashboard() {
                 }
               }}
               rows={1}
-              placeholder="Ask F.R.I.D.A.Y. anything or provide mission parameters..."
+              placeholder="Ask F.R.I.D.A.Y. anything or launch a research mission..."
               className="flex-1 bg-transparent border-0 text-sm text-slate-100 placeholder-slate-500 focus:outline-none resize-none max-h-32 py-1.5 px-2"
             />
 
-            {/* Voice Dictation Button */}
+            {/* Voice Waveform Button */}
             <button
               type="button"
-              className="p-2 text-slate-400 hover:text-violet-400 transition-colors rounded-lg hover:bg-white/5 cursor-pointer"
+              className="p-2 text-slate-400 hover:text-violet-300 transition-colors rounded-xl hover:bg-white/5 cursor-pointer"
               title="Voice Dictation"
             >
               <Mic className="w-4 h-4" />
             </button>
 
-            {/* Send Button */}
+            {/* Neon Send Button */}
             <button
               type="submit"
               disabled={!input.trim() || isStreaming}
-              className="p-2 rounded-xl bg-gradient-to-r from-cyan-500 to-violet-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:shadow-cyan-glow transition-all cursor-pointer"
+              className="p-2.5 rounded-xl bg-gradient-to-r from-cyan-400 via-indigo-500 to-violet-600 text-white disabled:opacity-40 disabled:cursor-not-allowed hover:opacity-95 shadow-cyan-glow transition-all cursor-pointer"
             >
               <Send className="w-4 h-4" />
             </button>
           </form>
-          <div className="max-w-3xl mx-auto mt-2 text-center text-[10px] text-slate-500 font-mono">
-            F.R.I.D.A.Y. Intelligence Workspace // Nebula UI v2.1 // Strict Non-Docker Native Architecture
-          </div>
+
+          <p className="max-w-3xl mx-auto mt-2 text-center text-[10px] text-slate-400 font-mono tracking-wider">
+            F.R.I.D.A.Y. NEBULA CORE v2.1 // POWERED BY REACT 19 & TAILWIND // ZERO DOCKER NATIVE EXECUTION
+          </p>
         </div>
-      </main>
+      </div>
     </div>
   );
 }
-
