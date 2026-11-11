@@ -14,7 +14,7 @@ import {
 import { useAuthStore } from '../../../stores/authStore';
 import { NebulaOrb } from '../../friday/components/NebulaOrb';
 
-export function Login() {
+export function Login({ onLoginSuccess }) {
   const navigate = useNavigate();
   const { setUser } = useAuthStore();
 
@@ -39,6 +39,7 @@ export function Login() {
         role: 'DEVELOPER',
         avatar: 'https://lh3.googleusercontent.com/a/default-user'
       };
+      if (onLoginSuccess) onLoginSuccess();
       setUser(googleUser, `google_jwt_token_${Date.now()}`);
       setLoading(false);
       navigate('/friday');
@@ -65,13 +66,15 @@ export function Login() {
 
       const data = await res.json();
       if (res.ok && data.data) {
+        if (onLoginSuccess) onLoginSuccess();
         setUser(data.data.user, data.data.tokens?.accessToken || 'jwt_active_session');
         navigate('/friday');
       } else {
         if (mode === 'signup') {
           // Switch to login tab and notify
-          setSuccessMsg('Account registered successfully. Signing into neural core...');
+          setSuccessMsg('Account registered successfully. Initializing neural core...');
           setTimeout(() => {
+            if (onLoginSuccess) onLoginSuccess();
             setUser(
               {
                 id: `usr_${Date.now()}`,
@@ -85,6 +88,7 @@ export function Login() {
           }, 800);
         } else {
           // Demo fallback authorization for seamless local testing
+          if (onLoginSuccess) onLoginSuccess();
           setUser(
             {
               id: 'usr_dev_default',
@@ -99,6 +103,7 @@ export function Login() {
       }
     } catch {
       // Offline graceful fallback
+      if (onLoginSuccess) onLoginSuccess();
       setUser(
         {
           id: 'usr_dev_default',

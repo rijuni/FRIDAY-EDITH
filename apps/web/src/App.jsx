@@ -4,34 +4,78 @@ import { FridayBoot } from './components/boot/FridayBoot';
 import { FridayDashboard } from './features/friday/pages/FridayDashboard';
 import { EdithPlaceholder } from './features/edith/pages/EdithPlaceholder';
 import { Login } from './features/auth/pages/Login';
+import { useAuthStore } from './stores/authStore';
 
-function MainApp() {
-  const location = useLocation();
+function ProtectedRoute({ children, bootCompleted, setBootCompleted }) {
+  const { isAuthenticated } = useAuthStore();
   const [searchParams] = useSearchParams();
-  const isLoginPage = location.pathname === '/login';
-  const skipBootParam = searchParams.get('noboot') === 'true' || isLoginPage;
-  const [bootCompleted, setBootCompleted] = useState(skipBootParam);
+  const skipBootParam = searchParams.get('noboot') === 'true';
 
-  const shouldShowBoot = !bootCompleted && !isLoginPage;
+  if (!isAuthenticated) {
+    return <Navigate to="/login" replace />;
+  }
 
-  return (
-    <>
-      {shouldShowBoot && (
-        <FridayBoot onComplete={() => setBootCompleted(true)} />
-      )}
-      <div className={`transition-opacity duration-700 ${bootCompleted || isLoginPage ? 'opacity-100' : 'opacity-0'}`}>
-        <Routes>
-          <Route path="/" element={<Navigate to="/friday" replace />} />
-          <Route path="/login" element={<Login />} />
-          <Route path="/friday" element={<FridayDashboard />} />
-          <Route path="/edith" element={<EdithPlaceholder />} />
-          <Route path="*" element={<Navigate to="/friday" replace />} />
-        </Routes>
-      </div>
-    </>
-  );
+  const shouldShowBoot = !bootCompleted && !skipBootParam;
+
+  if (shouldShowBoot) {
+    return <FridayBoot onComplete={() => setBootCompleted(true)} />;
+  }
+
+  return children;
 }
 
 export default function App() {
-  return <MainApp />;
+  const [bootCompleted, setBootCompleted] = useState(false);
+  const { isAuthenticated } = useAuthStore();
+
+  return (
+    <Routes>
+      {/* Root always redirects to /login first */}
+      <Route
+        path="/"
+        element={<Navigate to={isAuthenticated ? "/friday" : "/login"} replace />}
+      />
+
+      {/* Login Screen */}
+      <Route
+        path="/login"
+        element={
+          isAuthenticated ? (
+            <Navigate to="/friday" replace />
+          ) : (
+            <Login onLoginSuccess={() => setBootCompleted(false)} />
+          )
+        }
+      />
+
+      {/* F.R.I.D.A.Y. Dashboard: Protected by Auth & Shows Boot Animation first */}
+      <Route
+        path="/friday"
+        element={
+          <ProtectedRoute
+            bootCompleted={bootCompleted}
+            setBootCompleted={setBootCompleted}
+          >
+            <FridayDashboard />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* E.D.I.T.H. Developer IDE Workspace */}
+      <Route
+        path="/edith"
+        element={
+          <ProtectedRoute
+            bootCompleted={bootCompleted}
+            setBootCompleted={setBootCompleted}
+          >
+            <EdithPlaceholder />
+          </ProtectedRoute>
+        }
+      />
+
+      {/* Catch-all */}
+      <Route path="*" element={<Navigate to="/" replace />} />
+    </Routes>
+  );
 }

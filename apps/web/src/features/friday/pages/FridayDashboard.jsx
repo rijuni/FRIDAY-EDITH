@@ -17,7 +17,8 @@ import {
   Compass,
   Lightbulb,
   Zap,
-  ArrowUp
+  ArrowUp,
+  LogOut
 } from 'lucide-react';
 import { useFridayStore } from '../../../stores/fridayStore';
 import { useAuthStore } from '../../../stores/authStore';
@@ -25,7 +26,7 @@ import { NebulaOrb } from '../components/NebulaOrb';
 
 export function FridayDashboard() {
   const navigate = useNavigate();
-  const { user } = useAuthStore();
+  const { user, logout } = useAuthStore();
   const {
     conversations,
     messages,
@@ -203,6 +204,16 @@ export function FridayDashboard() {
             <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-300 hover:text-white transition-colors cursor-pointer">
               <HelpCircle className="w-4 h-4 text-slate-400" />
               <span>Help & Updates</span>
+            </button>
+            <button
+              onClick={() => {
+                logout();
+                navigate('/login');
+              }}
+              className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-red-500/15 text-slate-400 hover:text-red-300 transition-colors cursor-pointer"
+            >
+              <LogOut className="w-4 h-4 text-slate-400 group-hover:text-red-400" />
+              <span>Sign Out</span>
             </button>
 
             {/* Nebula Pro System Glass Card */}
