@@ -44,3 +44,4 @@ export function NebulaCore3D({ isStreaming }) {
     </div>
   );
 }
+

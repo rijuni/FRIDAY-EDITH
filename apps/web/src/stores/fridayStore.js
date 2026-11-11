@@ -37,3 +37,4 @@ export const useFridayStore = create((set, get) => ({
     set({ isStreaming: false, streamBuffer: '' });
   }
 }));
+
