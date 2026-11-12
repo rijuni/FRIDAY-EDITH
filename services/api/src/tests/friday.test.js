@@ -13,10 +13,42 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
 
   // Ephemeral local mock upstream representing Python friday-ai service
   let observedUpstreamHeaders = null;
+  let observedChatPayload = null;
   const mockAiServer = http.createServer((req, res) => {
     observedUpstreamHeaders = req.headers;
-    req.resume();
+    const chunks = [];
+    req.on('data', (c) => chunks.push(c));
     req.on('end', () => {
+      const rawBody = Buffer.concat(chunks).toString('utf8');
+      if (req.url === '/v1/health/ready' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'ready' }));
+        return;
+      }
+
+      if (req.url === '/v1/documents/parse' && req.method === 'POST') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(
+          JSON.stringify({
+            status: 'success',
+            data: {
+              filename: 'notes.md',
+              mime_type: 'text/markdown',
+              total_chars: 28,
+              chunk_count: 1,
+              chunks: [{ chunk_index: 0, text: '# Test Notes\nAttach content.', char_count: 28 }]
+            }
+          })
+        );
+        return;
+      }
+
+      try {
+        observedChatPayload = JSON.parse(rawBody || '{}');
+      } catch {
+        observedChatPayload = null;
+      }
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache'
@@ -104,7 +136,77 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
     });
     assert.equal(otherDeleteRes.status, 403);
 
-    // 5. Send message & verify SSE streaming + internal service auth headers + DB persistence
+    // 5a. Profile update, runtime status & support report endpoints
+    const profileRes = await fetch(`http://localhost:${port}/v1/auth/me`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenA}`
+      },
+      body: JSON.stringify({ name: 'Tony Updated' })
+    });
+    assert.equal(profileRes.status, 200);
+    const profileData = await profileRes.json();
+    assert.equal(profileData.data.user.name, 'Tony Updated');
+
+    const statusRes = await fetch(`${baseUrl}/status`, {
+      headers: { Authorization: `Bearer ${tokenA}` }
+    });
+    assert.equal(statusRes.status, 200);
+    const statusData = await statusRes.json();
+    assert.equal(statusData.data.subsystems.api.status, 'online');
+    assert.equal(statusData.data.subsystems.database.status, 'online');
+    assert.equal(statusData.data.subsystems.fridayAi.status, 'online');
+
+    const supportRes = await fetch(`${baseUrl}/support`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenA}`
+      },
+      body: JSON.stringify({
+        category: 'bug',
+        subject: 'Sample verification issue',
+        description: 'Testing support ticket persistence in Prisma AuditLog.'
+      })
+    });
+    assert.equal(supportRes.status, 201);
+    const supportData = await supportRes.json();
+    assert.match(supportData.data.report.id, /^SUP-/);
+
+    // 5b. Attach file cleanly through document parser & reject cross-user upload
+    const otherAttachRes = await fetch(`${baseUrl}/conversations/${convId}/attachments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenB}`
+      },
+      body: JSON.stringify({
+        filename: 'notes.md',
+        mimeType: 'text/markdown',
+        content: '# Test Notes\nAttach content.'
+      })
+    });
+    assert.equal(otherAttachRes.status, 403);
+
+    const attachRes = await fetch(`${baseUrl}/conversations/${convId}/attachments`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+        Authorization: `Bearer ${tokenA}`
+      },
+      body: JSON.stringify({
+        filename: 'notes.md',
+        mimeType: 'text/markdown',
+        content: '# Test Notes\nAttach content.'
+      })
+    });
+    assert.equal(attachRes.status, 201);
+    const attachData = await attachRes.json();
+    const attachmentId = attachData.data.attachment.id;
+    assert.equal(attachData.data.attachment.filename, 'notes.md');
+
+    // 5c. Send message with attachmentIds & verify SSE streaming + internal service auth headers + DB persistence
     const msgRes = await fetch(`${baseUrl}/conversations/${convId}/messages`, {
       method: 'POST',
       headers: {
@@ -112,7 +214,10 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
         'X-Request-Id': 'node-to-py-corr-1',
         Authorization: `Bearer ${tokenA}`
       },
-      body: JSON.stringify({ content: 'Explain neural streaming architecture' })
+      body: JSON.stringify({
+        content: 'Explain neural streaming architecture',
+        attachmentIds: [attachmentId]
+      })
     });
     assert.equal(msgRes.status, 200);
     assert.ok(msgRes.headers.get('content-type').includes('text/event-stream'));
@@ -123,8 +228,9 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
     assert.equal(observedUpstreamHeaders['x-internal-service-token'], config.INTERNAL_SERVICE_SECRET);
     assert.equal(observedUpstreamHeaders['x-user-id'], userA.user.id);
     assert.equal(observedUpstreamHeaders['x-request-id'], 'node-to-py-corr-1');
+    assert.match(observedChatPayload.messages.at(-1).content, /\[Attached File: notes\.md/);
 
-    // 6. Verify both user & assistant messages persisted + title auto-updated
+    // 6. Verify both user & assistant messages + attachments persisted + title auto-updated
     const getRes = await fetch(`${baseUrl}/conversations/${convId}`, {
       headers: { Authorization: `Bearer ${tokenA}` }
     });
@@ -134,6 +240,8 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
     assert.equal(conv.title, 'Explain neural streaming architecture');
     assert.equal(conv.messages.length, 2);
     assert.equal(conv.messages[0].role, 'user');
+    assert.equal(conv.messages[0].attachments.length, 1);
+    assert.equal(conv.messages[0].attachments[0].filename, 'notes.md');
     assert.equal(conv.messages[1].role, 'assistant');
     assert.equal(conv.messages[1].content, 'Hello from F.R.I.D.A.Y.');
 

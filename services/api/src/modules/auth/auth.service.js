@@ -278,6 +278,49 @@ export class AuthService {
     const { isActive, ...profile } = user;
     return profile;
   }
+
+  async updateProfile(userId, { name }, ip = null) {
+    const existing = await prisma.user.findUnique({ where: { id: userId } });
+    if (!existing || !existing.isActive) {
+      throw buildAuthError(existing ? 'Account is inactive' : 'User not found', existing ? 403 : 404);
+    }
+
+    const updated = await prisma.user.update({
+      where: { id: userId },
+      data: { name }
+    });
+
+    await auditService.logEvent({
+      action: 'USER_PROFILE_UPDATED',
+      userId,
+      resourceType: 'USER',
+      resourceId: userId,
+      details: { previousName: existing.name, newName: name },
+      ip
+    });
+
+    return sanitizeUser(updated);
+  }
+
+  async revokeOtherSessions(userId, currentRefreshToken = null, ip = null) {
+    const currentHash = currentRefreshToken ? hashToken(currentRefreshToken) : null;
+    const where = currentHash
+      ? { userId, tokenHash: { not: currentHash } }
+      : { userId };
+
+    const result = await prisma.session.deleteMany({ where });
+
+    await auditService.logEvent({
+      action: 'OTHER_SESSIONS_REVOKED',
+      userId,
+      resourceType: 'SESSION',
+      resourceId: userId,
+      details: { revokedCount: result.count },
+      ip
+    });
+
+    return { revokedCount: result.count };
+  }
 }
 
 export const authService = new AuthService();

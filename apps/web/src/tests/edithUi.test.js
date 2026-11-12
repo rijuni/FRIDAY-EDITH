@@ -73,6 +73,31 @@ describe('Frontend E.D.I.T.H. utilities, UI rendering & shared workspace package
     assert.match(deniedHtml, /Dismiss/);
   });
 
+  it('FridaySettingsModal and FridayHelpModal render accessible dialogs cleanly', async () => {
+    const FridaySettingsModal = await loadJsxComponent(
+      'features/friday/components/FridaySettingsModal.jsx',
+      'FridaySettingsModal'
+    );
+    const FridayHelpModal = await loadJsxComponent(
+      'features/friday/components/FridayHelpModal.jsx',
+      'FridayHelpModal'
+    );
+
+    const settingsHtml = renderToStaticMarkup(
+      React.createElement(FridaySettingsModal, { isOpen: true, onClose: () => {} })
+    );
+    assert.match(settingsHtml, /role="dialog"/);
+    assert.match(settingsHtml, /F\.R\.I\.D\.A\.Y\. Settings/);
+    assert.match(settingsHtml, /Save Changes/);
+
+    const helpHtml = renderToStaticMarkup(
+      React.createElement(FridayHelpModal, { isOpen: true, onClose: () => {}, onOpenEdith: () => {} })
+    );
+    assert.match(helpHtml, /role="dialog"/);
+    assert.match(helpHtml, /Help, Runtime Diagnostics &amp; Support/);
+    assert.match(helpHtml, /Submit Support or Bug Report/);
+  });
+
   it('Shared workspace packages export expected canonical constants', () => {
     assert.equal(AppRoutes.FRIDAY, '/friday');
     assert.equal(AppRoutes.EDITH, '/edith');

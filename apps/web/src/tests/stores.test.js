@@ -127,4 +127,73 @@ describe('Frontend Zustand stores (authStore & fridayStore)', () => {
       globalThis.fetch = prevFetch;
     }
   });
+
+  it('useFridayStore uploads pendingAttachments and links attachmentIds when sending', async () => {
+    const prevFetch = globalThis.fetch;
+    let observedMessageBody = null;
+
+    globalThis.fetch = async (url, init = {}) => {
+      if (url === '/v1/friday/conversations' && init.method === 'POST') {
+        return new Response(
+          JSON.stringify({ data: { conversation: { id: 'conv_att', title: 'New' } } }),
+          { status: 201 }
+        );
+      }
+      if (url === '/v1/friday/conversations/conv_att/attachments' && init.method === 'POST') {
+        return new Response(
+          JSON.stringify({
+            data: {
+              attachment: {
+                id: 'att_db_1',
+                conversationId: 'conv_att',
+                filename: 'spec.md',
+                mimeType: 'text/markdown',
+                sizeBytes: 18
+              }
+            }
+          }),
+          { status: 201 }
+        );
+      }
+      if (url === '/v1/friday/conversations/conv_att/messages' && init.method === 'POST') {
+        observedMessageBody = JSON.parse(init.body);
+        const stream = createSseStream(['data: {"event":"chunk","text":"Reviewed spec.md"}\n\n']);
+        return new Response(stream, {
+          status: 200,
+          headers: { 'Content-Type': 'text/event-stream' }
+        });
+      }
+      if (url.startsWith('/v1/friday/conversations?')) {
+        return new Response(JSON.stringify({ data: { conversations: [], pagination: {} } }), { status: 200 });
+      }
+      return new Response('{}', { status: 404 });
+    };
+
+    try {
+      useFridayStore.getState().setPreferences({
+        selectedModel: 'gpt-4o',
+        systemPrompt: 'Custom prompt',
+        temperature: 0.4
+      });
+      useFridayStore.getState().addPendingAttachment({
+        tempId: 'tmp_1',
+        filename: 'spec.md',
+        mimeType: 'text/markdown',
+        sizeBytes: 18,
+        content: '# Spec\nHello world'
+      });
+
+      await useFridayStore.getState().sendMessage('');
+      const state = useFridayStore.getState();
+
+      assert.equal(state.pendingAttachments.length, 0);
+      assert.deepEqual(observedMessageBody.attachmentIds, ['att_db_1']);
+      assert.equal(observedMessageBody.model, 'gpt-4o');
+      assert.equal(observedMessageBody.temperature, 0.4);
+      assert.equal(state.messages[0].attachments[0].filename, 'spec.md');
+      assert.equal(state.messages[1].content, 'Reviewed spec.md');
+    } finally {
+      globalThis.fetch = prevFetch;
+    }
+  });
 });

@@ -47,11 +47,21 @@ const assignRoleSchema = {
     .strict()
 };
 
+const updateProfileSchema = {
+  body: z
+    .object({
+      name: z.string().trim().min(2, 'Name must be at least 2 characters').max(80)
+    })
+    .strict()
+};
+
 authRouter.post('/register', authLimiter, validate(registerSchema), authController.register);
 authRouter.post('/login', authLimiter, validate(loginSchema), authController.login);
 authRouter.post('/refresh', authLimiter, validate(refreshSchema), authController.refresh);
 authRouter.post('/logout', authController.logout);
 authRouter.get('/me', authenticate, authController.getMe);
+authRouter.patch('/me', authenticate, validate(updateProfileSchema), authController.updateMe);
+authRouter.post('/sessions/revoke-others', authenticate, authController.revokeOtherSessions);
 authRouter.patch(
   '/users/:id/role',
   authenticate,

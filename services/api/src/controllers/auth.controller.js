@@ -124,6 +124,32 @@ export async function getMe(req, res, next) {
   }
 }
 
+export async function updateMe(req, res, next) {
+  try {
+    const profile = await authService.updateProfile(req.user.id, { name: req.body.name }, req.ip);
+    res.status(200).json({
+      status: 'success',
+      data: { user: profile }
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function revokeOtherSessions(req, res, next) {
+  try {
+    const cookies = parseCookies(req);
+    const currentRefreshToken = cookies[config.REFRESH_COOKIE_NAME] || null;
+    const result = await authService.revokeOtherSessions(req.user.id, currentRefreshToken, req.ip);
+    res.status(200).json({
+      status: 'success',
+      data: result
+    });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function assignRole(req, res, next) {
   try {
     const updatedUser = await authService.assignUserRole({

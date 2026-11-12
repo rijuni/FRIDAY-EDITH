@@ -1,12 +1,17 @@
 import { create } from 'zustand';
 import { apiFetch, safeParseJson } from '../lib/apiClient.js';
 
+const DEFAULT_SYSTEM_PROMPT = 'You are F.R.I.D.A.Y., a high-intelligence AI assistant.';
+
 const INITIAL_STATE = {
   conversations: [],
   pagination: { total: 0, limit: 25, offset: 0, hasMore: false },
   activeConversationId: null,
   messages: [],
   selectedModel: 'claude-3-7-sonnet',
+  systemPrompt: DEFAULT_SYSTEM_PROMPT,
+  temperature: 0.7,
+  pendingAttachments: [],
   isLoadingConversations: false,
   isLoadingMessages: false,
   isStreaming: false,
@@ -22,13 +27,44 @@ export const useFridayStore = create((set, get) => ({
   ...INITIAL_STATE,
 
   setModel: (model) => set({ selectedModel: model }),
+  setPreferences: ({ selectedModel, systemPrompt, temperature }) =>
+    set((state) => ({
+      selectedModel: selectedModel || state.selectedModel,
+      systemPrompt:
+        typeof systemPrompt === 'string' && systemPrompt.trim()
+          ? systemPrompt.trim()
+          : DEFAULT_SYSTEM_PROMPT,
+      temperature:
+        typeof temperature === 'number' && !Number.isNaN(temperature)
+          ? Math.min(2, Math.max(0, temperature))
+          : state.temperature
+    })),
   clearError: () => set({ error: null }),
+
+  addPendingAttachment: (attachment) =>
+    set((state) => {
+      if (state.pendingAttachments.length >= 5) {
+        return { error: 'Maximum of 5 attached files allowed per message.' };
+      }
+      return {
+        error: null,
+        pendingAttachments: [...state.pendingAttachments, attachment]
+      };
+    }),
+
+  removePendingAttachment: (tempId) =>
+    set((state) => ({
+      pendingAttachments: state.pendingAttachments.filter((a) => a.tempId !== tempId)
+    })),
+
+  clearPendingAttachments: () => set({ pendingAttachments: [] }),
 
   newChat: () => {
     get().activeAbortController?.abort();
     set({
       activeConversationId: null,
       messages: [],
+      pendingAttachments: [],
       streamBuffer: '',
       isStreaming: false,
       isMockResponse: false,
@@ -162,10 +198,12 @@ export const useFridayStore = create((set, get) => ({
   },
 
   sendMessage: async (rawPrompt) => {
-    const promptText = String(rawPrompt || '').trim();
+    const stagedAttachments = get().pendingAttachments;
+    const rawText = String(rawPrompt || '').trim();
+    const promptText = rawText || (stagedAttachments.length > 0 ? 'Please analyze the attached file(s).' : '');
     if (!promptText || get().isStreaming) return;
 
-    const { selectedModel } = get();
+    const { selectedModel, systemPrompt, temperature } = get();
     let convId = get().activeConversationId;
     const abortController = new AbortController();
 
@@ -178,11 +216,11 @@ export const useFridayStore = create((set, get) => ({
     });
 
     try {
-      // 1. Ensure a persisted conversation exists before sending message
+      // 1. Ensure a persisted conversation exists before sending message or uploading attachments
       if (!convId) {
         const createRes = await apiFetch('/v1/friday/conversations', {
           method: 'POST',
-          body: JSON.stringify({ modelPreference: selectedModel }),
+          body: JSON.stringify({ modelPreference: selectedModel, systemPrompt }),
           signal: abortController.signal
         });
         const createPayload = await safeParseJson(createRes);
@@ -196,18 +234,57 @@ export const useFridayStore = create((set, get) => ({
         });
       }
 
-      // 2. Append optimistic user message
+      // 2. Upload any staged file attachments via API + Python document parser
+      const uploadedAttachments = [];
+      for (const att of stagedAttachments) {
+        const uploadRes = await apiFetch(
+          `/v1/friday/conversations/${encodeURIComponent(convId)}/attachments`,
+          {
+            method: 'POST',
+            body: JSON.stringify({
+              filename: att.filename,
+              mimeType: att.mimeType,
+              content: att.content
+            }),
+            signal: abortController.signal
+          }
+        );
+        const uploadPayload = await safeParseJson(uploadRes);
+        if (!uploadRes.ok || !uploadPayload?.data?.attachment?.id) {
+          throw new Error(uploadPayload?.message || `Failed to attach ${att.filename}.`);
+        }
+        uploadedAttachments.push(uploadPayload.data.attachment);
+      }
+
+      // 3. Append optimistic user message (with uploaded attachment chips)
       const userMsgId = `msg_user_${Date.now()}`;
       set((state) => ({
-        messages: [...state.messages, { id: userMsgId, role: 'user', content: promptText }]
+        pendingAttachments: [],
+        messages: [
+          ...state.messages,
+          {
+            id: userMsgId,
+            role: 'user',
+            content: promptText,
+            attachments: uploadedAttachments
+          }
+        ]
       }));
 
-      // 3. Stream assistant response through Node API persistence proxy
+      // 4. Stream assistant response through Node API persistence proxy
       const streamRes = await apiFetch(
         `/v1/friday/conversations/${encodeURIComponent(convId)}/messages`,
         {
           method: 'POST',
-          body: JSON.stringify({ content: promptText, model: selectedModel }),
+          body: JSON.stringify({
+            content: promptText,
+            model: selectedModel,
+            temperature,
+            systemPrompt,
+            ...(uploadedAttachments.length > 0
+              ? { attachmentIds: uploadedAttachments.map((a) => a.id) }
+              : {})
+          }),
           signal: abortController.signal
         }
       );

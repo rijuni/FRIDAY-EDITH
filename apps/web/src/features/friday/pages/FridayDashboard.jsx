@@ -25,16 +25,38 @@ import {
   RotateCcw,
   AlertCircle,
   X,
-  Loader2
+  Loader2,
+  FileText
 } from 'lucide-react';
 import { useFridayStore } from '../../../stores/fridayStore';
 import { useAuthStore } from '../../../stores/authStore';
 import { NebulaOrb } from '../components/NebulaOrb';
+import { FridaySettingsModal } from '../components/FridaySettingsModal';
+import { FridayHelpModal } from '../components/FridayHelpModal';
+
+const MAX_ATTACHMENT_BYTES = 512 * 1024;
+const EXTENSION_MIME_MAP = {
+  '.txt': 'text/plain',
+  '.md': 'text/markdown',
+  '.markdown': 'text/markdown',
+  '.csv': 'text/csv',
+  '.json': 'application/json'
+};
+
+function resolveAttachmentMime(filename, rawType) {
+  const dotIdx = filename.lastIndexOf('.');
+  const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
+  if (EXTENSION_MIME_MAP[ext]) return EXTENSION_MIME_MAP[ext];
+  if (rawType && Object.values(EXTENSION_MIME_MAP).includes(rawType)) return rawType;
+  return null;
+}
 
 export function FridayDashboard() {
   const navigate = useNavigate();
-  const { user, logout } = useAuthStore();
+  const { logout } = useAuthStore();
   const [sidebarOpen, setSidebarOpen] = useState(true);
+  const [settingsOpen, setSettingsOpen] = useState(false);
+  const [helpOpen, setHelpOpen] = useState(false);
   const {
     conversations,
     pagination,
@@ -42,6 +64,9 @@ export function FridayDashboard() {
     messages,
     selectedModel,
     setModel,
+    pendingAttachments,
+    addPendingAttachment,
+    removePendingAttachment,
     isLoadingConversations,
     isLoadingMessages,
     isStreaming,
@@ -62,6 +87,7 @@ export function FridayDashboard() {
   const [input, setInput] = useState('');
   const [featureNotice, setFeatureNotice] = useState(null);
   const messagesEndRef = useRef(null);
+  const fileInputRef = useRef(null);
 
   useEffect(() => {
     fetchConversations();
@@ -75,9 +101,52 @@ export function FridayDashboard() {
     scrollToBottom();
   }, [messages, streamBuffer, isLoadingMessages]);
 
+  const handleFileSelect = async (e) => {
+    const selectedFiles = Array.from(e.target.files || []);
+    e.target.value = '';
+    if (selectedFiles.length === 0) return;
+
+    setFeatureNotice(null);
+    for (const file of selectedFiles) {
+      const mimeType = resolveAttachmentMime(file.name, file.type);
+      if (!mimeType) {
+        setFeatureNotice(
+          `Unsupported file "${file.name}". Allowed formats: .txt, .md, .csv, .json.`
+        );
+        continue;
+      }
+
+      if (file.size === 0 || file.size > MAX_ATTACHMENT_BYTES) {
+        setFeatureNotice(
+          `"${file.name}" must be non-empty and under 512 KB for F.R.I.D.A.Y. chat ingestion.`
+        );
+        continue;
+      }
+
+      try {
+        const buffer = await file.arrayBuffer();
+        const bytes = new Uint8Array(buffer);
+        if (bytes.includes(0)) {
+          setFeatureNotice(`"${file.name}" appears to contain binary data and cannot be attached.`);
+          continue;
+        }
+        const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+        addPendingAttachment({
+          tempId: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+          filename: file.name,
+          mimeType,
+          sizeBytes: file.size,
+          content
+        });
+      } catch {
+        setFeatureNotice(`"${file.name}" is not valid UTF-8 text.`);
+      }
+    }
+  };
+
   const handleSend = async (directText = null) => {
     const promptText = (typeof directText === 'string' ? directText : input).trim();
-    if (!promptText || isStreaming) return;
+    if ((!promptText && pendingAttachments.length === 0) || isStreaming) return;
 
     if (typeof directText !== 'string') {
       setInput('');
@@ -240,11 +309,10 @@ export function FridayDashboard() {
             <div className="pt-4 border-t border-white/10 space-y-2 text-xs text-slate-400">
               <button
                 type="button"
-                onClick={() =>
-                  setFeatureNotice(
-                    `Signed in as ${user?.email || 'authenticated user'}. Workspace preferences use your active session cookie.`
-                  )
-                }
+                onClick={() => {
+                  setFeatureNotice(null);
+                  setSettingsOpen(true);
+                }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-300 hover:text-white transition-colors cursor-pointer"
               >
                 <Settings className="w-4 h-4 text-slate-400" />
@@ -252,15 +320,14 @@ export function FridayDashboard() {
               </button>
               <button
                 type="button"
-                onClick={() =>
-                  setFeatureNotice(
-                    'F.R.I.D.A.Y. is routed through the Node.js persistence API to the Python intelligence runtime. Switch to E.D.I.T.H. // IDE for code tasks.'
-                  )
-                }
+                onClick={() => {
+                  setFeatureNotice(null);
+                  setHelpOpen(true);
+                }}
                 className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-300 hover:text-white transition-colors cursor-pointer"
               >
                 <HelpCircle className="w-4 h-4 text-slate-400" />
-                <span>Help & Updates</span>
+                <span>Help & Support</span>
               </button>
               <button
                 onClick={async () => {
@@ -438,6 +505,19 @@ export function FridayDashboard() {
                               : 'frosted-glass-card text-slate-100 max-w-xl'
                           }`}
                         >
+                          {Array.isArray(msg.attachments) && msg.attachments.length > 0 && (
+                            <div className="flex flex-wrap gap-1.5 mb-2">
+                              {msg.attachments.map((att) => (
+                                <span
+                                  key={att.id || att.filename}
+                                  className="inline-flex items-center gap-1.5 px-2 py-1 rounded-lg bg-black/25 border border-white/15 text-[11px] font-mono text-purple-100"
+                                >
+                                  <FileText className="w-3 h-3 text-purple-300 shrink-0" />
+                                  <span className="truncate max-w-[160px]">{att.filename}</span>
+                                </span>
+                              ))}
+                            </div>
+                          )}
                           <div>{msg.content}</div>
                           {msg.role === 'assistant' && msg.isMock && (
                             <div className="mt-2 pt-1.5 border-t border-white/10 text-[10px] font-mono text-amber-300/90">
@@ -516,6 +596,31 @@ export function FridayDashboard() {
                 </div>
               )}
 
+              {pendingAttachments.length > 0 && (
+                <div className="flex flex-wrap gap-2 px-1">
+                  {pendingAttachments.map((att) => (
+                    <div
+                      key={att.tempId}
+                      className="flex items-center gap-2 px-3 py-1.5 rounded-xl glass-pill border border-purple-400/35 text-xs text-purple-100"
+                    >
+                      <FileText className="w-3.5 h-3.5 text-purple-300 shrink-0" />
+                      <span className="truncate max-w-[180px] font-medium">{att.filename}</span>
+                      <span className="text-[10px] font-mono text-slate-400">
+                        {Math.max(1, Math.round(att.sizeBytes / 1024))} KB
+                      </span>
+                      <button
+                        type="button"
+                        onClick={() => removePendingAttachment(att.tempId)}
+                        aria-label={`Remove ${att.filename}`}
+                        className="p-0.5 rounded hover:bg-white/10 text-slate-300 hover:text-white cursor-pointer"
+                      >
+                        <X className="w-3 h-3" />
+                      </button>
+                    </div>
+                  ))}
+                </div>
+              )}
+
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -523,16 +628,21 @@ export function FridayDashboard() {
                 }}
                 className="flex items-center gap-2 p-2 rounded-2xl frosted-glass-input transition-all"
               >
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  multiple
+                  accept=".txt,.md,.markdown,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                  onChange={handleFileSelect}
+                  className="hidden"
+                />
                 <button
                   type="button"
-                  onClick={() =>
-                    setFeatureNotice(
-                      'File attachment upload is not enabled in F.R.I.D.A.Y. chat yet. Open E.D.I.T.H. // IDE to inspect workspace files.'
-                    )
-                  }
+                  disabled={isStreaming || isLoadingMessages}
+                  onClick={() => fileInputRef.current?.click()}
                   aria-label="Attach File"
-                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
-                  title="Attach File"
+                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
+                  title="Attach .txt, .md, .csv, or .json file (max 512 KB)"
                 >
                   <Paperclip className="w-4 h-4" />
                 </button>
@@ -571,7 +681,7 @@ export function FridayDashboard() {
                 ) : (
                   <button
                     type="submit"
-                    disabled={!input.trim() || isLoadingMessages}
+                    disabled={(!input.trim() && pendingAttachments.length === 0) || isLoadingMessages}
                     aria-label="Send message"
                     title="Send message"
                     className="p-2 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-purple-600/30 cursor-pointer border border-white/20"
@@ -584,6 +694,13 @@ export function FridayDashboard() {
           </div>
         </div>
       </div>
+
+      <FridaySettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <FridayHelpModal
+        isOpen={helpOpen}
+        onClose={() => setHelpOpen(false)}
+        onOpenEdith={() => navigate('/edith')}
+      />
     </div>
   );
 }
