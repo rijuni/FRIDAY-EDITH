@@ -12,13 +12,15 @@
   "scripts": {
     "dev:web": "npm run dev --workspace=@friday-edith/web",
     "dev:api": "npm run dev --workspace=@friday-edith/api",
+    "dev:runner": "npm run start --prefix runner-host/runner-service",
     "build:web": "npm run build --workspace=@friday-edith/web",
-    "build:api": "npm run build --workspace=@friday-edith/api",
+    "build:api": "npm run db:validate:mysql && node --check services/api/src/server.js",
     "test:web": "npm run test --workspace=@friday-edith/web",
     "test:api": "npm run test --workspace=@friday-edith/api",
-    "test": "npm run test:api && npm run test:web",
-    "lint": "eslint .",
-    "format": "prettier --write ."
+    "test:runner": "npm run test --prefix runner-host/runner-service",
+    "test": "npm run test:api && npm run test:web && npm run test:runner",
+    "db:seed": "npm run prisma:seed --workspace=@friday-edith/api",
+    "db:validate:mysql": "npm run db:validate:mysql --workspace=@friday-edith/api"
   },
   "keywords": [
     "ai",

@@ -1,161 +1,321 @@
 import { Router } from 'express';
+import { z } from 'zod';
+import { config } from '../../config/index.js';
 import { authenticate } from '../../middleware/authenticate.js';
+import { validate } from '../../middleware/validate.js';
+import { auditService } from '../../modules/audit/audit.service.js';
+import { logger } from '../../utils/logger.js';
 
 export const edithRouter = Router();
 
-const EDITH_ENGINE_URL = process.env.EDITH_ENGINE_URL || 'http://127.0.0.1:8002';
-const RUNNER_HOST_URL = process.env.RUNNER_HOST_URL || 'http://127.0.0.1:8003';
+function getEdithEngineUrl() {
+  return process.env.EDITH_ENGINE_URL || config.EDITH_ENGINE_SERVICE_URL;
+}
 
-// Autonomous Coding Agent Execution Loop (Claude Code / Codex ReAct)
-edithRouter.post('/agent/run', authenticate, async (req, res, next) => {
-  try {
-    const response = await fetch(`${EDITH_ENGINE_URL}/v1/agent/run`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (err) {
-    // Offline simulation fallback for autonomous coding cycle
-    return res.json([
-      {
-        step_id: 'step_1',
-        phase: 'thinking',
-        title: 'Task Formulation: Claude 3.7 Reasoning',
-        detail: `Decomposing instruction: "${req.body.prompt || 'Code Task'}". Scanning AST symbol dependencies.`,
-        status: 'completed'
-      },
-      {
-        step_id: 'step_2',
-        phase: 'tool_call',
-        title: 'Tool: indexer.scan_file_tree',
-        tool_name: 'indexer.scan_file_tree',
-        detail: 'Indexed 1,935 symbols across services and web workspace.',
-        status: 'completed'
-      },
-      {
-        step_id: 'step_3',
-        phase: 'patch_proposal',
-        title: 'Patch Synthesized: 2 Unified Diffs',
-        detail: 'Generated verified hunk patch for target module.',
-        diff_text: '--- a/gateway.py\n+++ b/gateway.py\n@@ -15,3 +15,5 @@\n+    r"^(pytest)(\\s+.*)?$"',
-        status: 'completed'
-      },
-      {
-        step_id: 'step_4',
-        phase: 'tool_call',
-        title: 'Sandbox Verification in Runner (Host 8003)',
-        tool_name: 'runner.execute',
-        detail: 'Running pytest in isolated runner boundary: 4/4 passed (0.40s).',
-        status: 'completed'
-      },
-      {
-        step_id: 'step_5',
-        phase: 'complete',
-        title: 'Autonomous Coding Task Completed',
-        detail: 'Code modifications verified cleanly with zero regressions.',
-        status: 'completed'
-      }
-    ]);
+function getRunnerHostUrl() {
+  return process.env.RUNNER_HOST_URL || config.EDITH_RUNNER_SERVICE_URL;
+}
+
+function buildInternalHeaders(req) {
+  return {
+    'Content-Type': 'application/json',
+    'X-Internal-Service-Token': config.INTERNAL_SERVICE_SECRET,
+    'X-User-Id': req.user.id,
+    'X-Request-Id': req.id || ''
+  };
+}
+
+async function fetchJsonFromInternalService({ baseUrl, endpointPath, req, body }) {
+  const response = await fetch(`${baseUrl}${endpointPath}`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(config.AI_REQUEST_TIMEOUT_MS),
+    headers: buildInternalHeaders(req),
+    body: JSON.stringify(body)
+  });
+
+  const text = await response.text();
+  let data = null;
+  if (text) {
+    try {
+      data = JSON.parse(text);
+    } catch {
+      data = { raw: text };
+    }
   }
+  return { response, data };
+}
+
+async function forwardToService({ baseUrl, endpointPath, req, res, errorCode, unavailableMessage }) {
+  try {
+    const { response, data } = await fetchJsonFromInternalService({
+      baseUrl,
+      endpointPath,
+      req,
+      body: req.body
+    });
+    return res.status(response.status).json(data ?? {});
+  } catch (err) {
+    const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+    const statusCode = isTimeout ? 504 : 502;
+    logger.error({ err: err?.message, endpointPath, requestId: req.id }, unavailableMessage);
+    return res.status(statusCode).json({
+      status: 'error',
+      statusCode,
+      errorCode: isTimeout ? 'EDITH_SERVICE_TIMEOUT' : errorCode,
+      message: unavailableMessage
+    });
+  }
+}
+
+const schemas = {
+  agentRun: {
+    body: z
+      .object({
+        prompt: z.string().trim().min(1).max(8000),
+        workspace_root: z.string().trim().min(1).max(512).optional(),
+        target_file: z.string().trim().min(1).max(512).optional()
+      })
+      .strict()
+  },
+  taskPlan: {
+    body: z
+      .object({
+        goal: z.string().trim().min(1).max(4000),
+        workspace_root: z.string().trim().min(1).max(512).optional(),
+        target_files: z.array(z.string().trim().min(1).max(512)).max(25).optional()
+      })
+      .strict()
+  },
+  policyEvaluate: {
+    body: z
+      .object({
+        command: z.string().trim().min(1).max(2000)
+      })
+      .strict()
+  },
+  diffGenerate: {
+    body: z
+      .object({
+        file_path: z.string().trim().min(1).max(512),
+        original_content: z.string().max(1_048_576),
+        modified_content: z.string().max(1_048_576)
+      })
+      .strict()
+  },
+  diffApply: {
+    body: z
+      .object({
+        original_content: z.string().max(1_048_576),
+        patch_text: z.string().max(1_048_576)
+      })
+      .strict()
+  },
+  repositoryScan: {
+    body: z
+      .object({
+        workspace_root: z.string().trim().min(1).max(512).optional(),
+        max_files: z.coerce.number().int().min(1).max(500).optional()
+      })
+      .strict()
+  },
+  fileRead: {
+    body: z
+      .object({
+        relative_path: z.string().trim().min(1).max(512),
+        workspace_root: z.string().trim().min(1).max(512).optional()
+      })
+      .strict()
+  },
+  execute: {
+    body: z
+      .object({
+        command: z.string().trim().min(1).max(2000),
+        approved: z.boolean().optional(),
+        cwd: z.string().trim().min(1).max(512).optional()
+      })
+      .strict()
+  }
+};
+
+// Autonomous Coding Agent Execution Loop
+edithRouter.post('/agent/run', authenticate, validate(schemas.agentRun), async (req, res) => {
+  return forwardToService({
+    baseUrl: getEdithEngineUrl(),
+    endpointPath: '/v1/agent/run',
+    req,
+    res,
+    errorCode: 'EDITH_ENGINE_UNAVAILABLE',
+    unavailableMessage: 'E.D.I.T.H. Agent Engine is offline or unreachable'
+  });
 });
 
 // Task Decomposition Plan
-edithRouter.post('/tasks/plan', authenticate, async (req, res, next) => {
-  try {
-    const response = await fetch(`${EDITH_ENGINE_URL}/v1/agent/plan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (err) {
-    // Offline simulation fallback for seamless dev
-    return res.json({
-      plan_id: `plan_${Date.now()}`,
-      goal: req.body.goal || 'General task',
-      total_steps: 3,
-      steps: [
-        { id: 'step_1', order: 1, name: 'Index Symbols & Parse AST', action_type: 'inspect', status: 'completed' },
-        { id: 'step_2', order: 2, name: 'Synthesize Patch Hunks', action_type: 'patch', status: 'pending' },
-        { id: 'step_3', order: 3, name: 'Verify in Isolated Runner', action_type: 'verify', status: 'pending' }
-      ]
-    });
-  }
+edithRouter.post('/tasks/plan', authenticate, validate(schemas.taskPlan), async (req, res) => {
+  return forwardToService({
+    baseUrl: getEdithEngineUrl(),
+    endpointPath: '/v1/agent/plan',
+    req,
+    res,
+    errorCode: 'EDITH_ENGINE_UNAVAILABLE',
+    unavailableMessage: 'E.D.I.T.H. Planner Engine is offline or unreachable'
+  });
 });
 
-// Command Policy Evaluation (Safe / Confirmation / Denied)
-edithRouter.post('/policies/evaluate', authenticate, async (req, res, next) => {
-  try {
-    const response = await fetch(`${EDITH_ENGINE_URL}/v1/agent/policies/evaluate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (err) {
-    const cmd = req.body.command || '';
-    const isSafe = /^(git status|dir|ls|node -v|npm test)/i.test(cmd);
-    return res.json({
-      command: cmd,
-      decision: isSafe ? 'SAFE' : 'CONFIRMATION_REQUIRED',
-      reason: isSafe ? 'Read-only verification command' : 'Requires explicit authorization',
-      risk_score: isSafe ? 10 : 65
-    });
-  }
+// Command Policy Evaluation (SAFE / CONFIRMATION_REQUIRED / DENIED)
+edithRouter.post('/policies/evaluate', authenticate, validate(schemas.policyEvaluate), async (req, res) => {
+  return forwardToService({
+    baseUrl: getEdithEngineUrl(),
+    endpointPath: '/v1/agent/policies/evaluate',
+    req,
+    res,
+    errorCode: 'POLICY_ENGINE_UNAVAILABLE',
+    unavailableMessage: 'E.D.I.T.H. Policy Engine is offline or unreachable'
+  });
 });
 
 // Diff Generation
-edithRouter.post('/diff/generate', authenticate, async (req, res, next) => {
-  try {
-    const response = await fetch(`${EDITH_ENGINE_URL}/v1/agent/diff/generate`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (err) {
-    return res.status(502).json({ error: 'Diff engine offline', details: err.message });
-  }
+edithRouter.post('/diff/generate', authenticate, validate(schemas.diffGenerate), async (req, res) => {
+  return forwardToService({
+    baseUrl: getEdithEngineUrl(),
+    endpointPath: '/v1/agent/diff/generate',
+    req,
+    res,
+    errorCode: 'DIFF_ENGINE_UNAVAILABLE',
+    unavailableMessage: 'E.D.I.T.H. Diff Engine is offline or unreachable'
+  });
 });
 
-// Runner Execution Forwarder
-edithRouter.post('/execute', authenticate, async (req, res, next) => {
-  try {
-    const response = await fetch(`${RUNNER_HOST_URL}/v1/execute`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (err) {
-    return res.json({
-      jobId: `run_${Date.now()}`,
-      exitCode: 0,
-      stdout: `[runner-host simulated]: Command '${req.body.command}' executed cleanly in native sandbox.\n`,
-      stderr: '',
-      durationMs: 42
-    });
-  }
+// Strict Diff Patch Application
+edithRouter.post('/diff/apply', authenticate, validate(schemas.diffApply), async (req, res) => {
+  return forwardToService({
+    baseUrl: getEdithEngineUrl(),
+    endpointPath: '/v1/agent/diff/apply',
+    req,
+    res,
+    errorCode: 'DIFF_ENGINE_UNAVAILABLE',
+    unavailableMessage: 'E.D.I.T.H. Diff Engine is offline or unreachable'
+  });
 });
 
 // Repository AST Scan
-edithRouter.post('/repository/scan', authenticate, async (req, res, next) => {
-  try {
-    const response = await fetch(`${EDITH_ENGINE_URL}/v1/agent/repository/scan`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify(req.body)
-    });
-    const data = await response.json();
-    return res.status(response.status).json(data);
-  } catch (err) {
-    return res.status(502).json({ error: 'AST indexer offline', details: err.message });
-  }
+edithRouter.post('/repository/scan', authenticate, validate(schemas.repositoryScan), async (req, res) => {
+  return forwardToService({
+    baseUrl: getEdithEngineUrl(),
+    endpointPath: '/v1/agent/repository/scan',
+    req,
+    res,
+    errorCode: 'AST_INDEXER_UNAVAILABLE',
+    unavailableMessage: 'E.D.I.T.H. Repository Indexer is offline or unreachable'
+  });
 });
 
+// Allowlisted Workspace File Read
+edithRouter.post('/files/read', authenticate, validate(schemas.fileRead), async (req, res) => {
+  return forwardToService({
+    baseUrl: getEdithEngineUrl(),
+    endpointPath: '/v1/agent/files/read',
+    req,
+    res,
+    errorCode: 'WORKSPACE_READ_UNAVAILABLE',
+    unavailableMessage: 'E.D.I.T.H. Workspace File Reader is offline or unreachable'
+  });
+});
+
+// Policy-Enforced Runner Execution Forwarder (Fail-Closed)
+edithRouter.post('/execute', authenticate, validate(schemas.execute), async (req, res) => {
+  const { command, approved = false, cwd } = req.body;
+
+  // 1. Fail-closed Policy Evaluation via Python Policy Gateway before touching Runner Host
+  let policy = null;
+  try {
+    const policyRes = await fetchJsonFromInternalService({
+      baseUrl: getEdithEngineUrl(),
+      endpointPath: '/v1/agent/policies/evaluate',
+      req,
+      body: { command }
+    });
+    if (!policyRes.response.ok || !policyRes.data?.decision) {
+      return res.status(502).json({
+        status: 'error',
+        statusCode: 502,
+        errorCode: 'POLICY_ENGINE_UNAVAILABLE',
+        message: 'Command policy evaluation failed; execution blocked fail-closed.'
+      });
+    }
+    policy = policyRes.data;
+  } catch (err) {
+    logger.error({ err: err?.message, requestId: req.id }, 'Policy check failed before command execution');
+    return res.status(502).json({
+      status: 'error',
+      statusCode: 502,
+      errorCode: 'POLICY_ENGINE_UNAVAILABLE',
+      message: 'Command policy engine unreachable; execution blocked fail-closed.'
+    });
+  }
+
+  if (policy.decision === 'DENIED') {
+    await auditService.logEvent({
+      action: 'EDITH_COMMAND_DENIED',
+      userId: req.user.id,
+      resourceType: 'RUNNER_COMMAND',
+      status: 'FAILURE',
+      ip: req.ip,
+      details: { command, riskScore: policy.risk_score, reason: policy.reason }
+    });
+    return res.status(403).json({
+      status: 'fail',
+      statusCode: 403,
+      errorCode: 'POLICY_DENIED',
+      message: policy.reason || 'Command prohibited by zero-trust policy gateway.',
+      policy
+    });
+  }
+
+  if (policy.decision === 'CONFIRMATION_REQUIRED' && approved !== true) {
+    await auditService.logEvent({
+      action: 'EDITH_COMMAND_APPROVAL_REQUIRED',
+      userId: req.user.id,
+      resourceType: 'RUNNER_COMMAND',
+      status: 'FAILURE',
+      ip: req.ip,
+      details: { command, riskScore: policy.risk_score }
+    });
+    return res.status(409).json({
+      status: 'fail',
+      statusCode: 409,
+      errorCode: 'APPROVAL_REQUIRED',
+      message: policy.reason || 'Explicit human confirmation required before executing command.',
+      policy
+    });
+  }
+
+  await auditService.logEvent({
+    action: 'EDITH_COMMAND_DISPATCHED',
+    userId: req.user.id,
+    resourceType: 'RUNNER_COMMAND',
+    status: 'SUCCESS',
+    ip: req.ip,
+    details: { command, decision: policy.decision, approved: Boolean(approved) }
+  });
+
+  // 2. Forward approved/safe command to isolated Native Runner Host
+  try {
+    const { response, data } = await fetchJsonFromInternalService({
+      baseUrl: getRunnerHostUrl(),
+      endpointPath: '/v1/execute',
+      req,
+      body: { command, ...(cwd ? { cwd } : {}) }
+    });
+    return res.status(response.status).json(data ?? {});
+  } catch (err) {
+    const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
+    const statusCode = isTimeout ? 504 : 502;
+    logger.error({ err: err?.message, requestId: req.id }, 'Runner host unreachable during execute');
+    return res.status(statusCode).json({
+      status: 'error',
+      statusCode,
+      errorCode: isTimeout ? 'RUNNER_TIMEOUT' : 'RUNNER_UNAVAILABLE',
+      message: 'Isolated Sandbox Runner (Host 8003) is offline or unreachable'
+    });
+  }
+});

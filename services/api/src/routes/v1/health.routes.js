@@ -1,4 +1,5 @@
 import { Router } from 'express';
+import { prisma } from '../../repositories/prisma.js';
 
 export const healthRouter = Router();
 
@@ -12,13 +13,25 @@ healthRouter.get('/', (req, res) => {
   });
 });
 
-healthRouter.get('/readiness', (req, res) => {
-  res.status(200).json({
-    status: 'ready',
-    subsystems: {
-      api: 'up',
-      auth: 'up'
-    }
-  });
+healthRouter.get('/readiness', async (req, res) => {
+  try {
+    await prisma.$queryRaw`SELECT 1`;
+    return res.status(200).json({
+      status: 'ready',
+      subsystems: {
+        api: 'up',
+        database: 'up',
+        auth: 'up'
+      }
+    });
+  } catch {
+    return res.status(503).json({
+      status: 'not_ready',
+      subsystems: {
+        api: 'up',
+        database: 'down',
+        auth: 'degraded'
+      }
+    });
+  }
 });
-

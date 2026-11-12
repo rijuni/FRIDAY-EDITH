@@ -8,7 +8,7 @@
     "dev:web": "vite",
     "build": "vite build",
     "preview": "vite preview",
-    "test": "echo \"Frontend tests pass\""
+    "test": "node --test src/tests/*.test.js"
   },
   "dependencies": {
     "@friday-edith/contracts": "*",

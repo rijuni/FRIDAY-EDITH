@@ -11,6 +11,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config();
 
 const DEFAULT_DEV_JWT_SECRET = 'development_jwt_secret_must_be_overridden_in_prod';
+const DEFAULT_INTERNAL_SERVICE_SECRET = 'dev_internal_service_secret_change_in_prod';
 
 const envSchema = z.object({
   NODE_ENV: z.enum(['development', 'production', 'test']).default('development'),
@@ -32,6 +33,10 @@ const envSchema = z.object({
     .optional()
     .transform((v) => (v === undefined ? undefined : v === 'true')),
 
+  // Service-to-service Internal Auth & Timeouts
+  INTERNAL_SERVICE_SECRET: z.string().min(16).default(DEFAULT_INTERNAL_SERVICE_SECRET),
+  AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
+
   // Internal AI Microservice URLs
   FRIDAY_AI_SERVICE_URL: z.string().url().default('http://localhost:8001'),
   EDITH_ENGINE_SERVICE_URL: z.string().url().default('http://localhost:8002'),
@@ -45,8 +50,13 @@ if (!parsed.success) {
   throw new Error('Environment configuration error');
 }
 
-if (parsed.data.NODE_ENV === 'production' && parsed.data.JWT_SECRET === DEFAULT_DEV_JWT_SECRET) {
-  throw new Error('JWT_SECRET must be overridden in production environment');
+if (parsed.data.NODE_ENV === 'production') {
+  if (parsed.data.JWT_SECRET === DEFAULT_DEV_JWT_SECRET) {
+    throw new Error('JWT_SECRET must be overridden in production environment');
+  }
+  if (parsed.data.INTERNAL_SERVICE_SECRET === DEFAULT_INTERNAL_SERVICE_SECRET) {
+    throw new Error('INTERNAL_SERVICE_SECRET must be overridden in production environment');
+  }
 }
 
 export const config = {

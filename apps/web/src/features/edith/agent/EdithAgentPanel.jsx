@@ -1,122 +1,100 @@
 import React, { useState } from 'react';
 import {
-  Sparkles,
   Send,
   Cpu,
   Terminal,
-  Shield,
-  Code2,
   CheckCircle2,
-  Play,
-  ArrowRight,
   FileCode,
-  Layers,
   Wand2,
   RefreshCw,
   X,
-  ChevronRight
+  ChevronRight,
+  AlertCircle
 } from 'lucide-react';
+import { apiFetch, safeParseJson } from '../../../lib/apiClient';
 
 export function EdithAgentPanel({
   isOpen = true,
+  activeFile = null,
   onClose,
   onOpenDiffReview,
-  onRunTerminalCommand
+  onBusyChange
 }) {
   const [prompt, setPrompt] = useState('');
   const [isBusy, setIsBusy] = useState(false);
+  const [error, setError] = useState(null);
+  const [lastPrompt, setLastPrompt] = useState(null);
   const [agentSteps, setAgentSteps] = useState([
     {
       step_id: 'init_1',
       phase: 'complete',
-      title: 'E.D.I.T.H. Autonomous Agent Online',
-      detail: 'ReAct agent initialized with AST Code Indexer, Diff Engine, and Native Sandbox Runner (Port 8003). Enter any development prompt below.',
+      title: 'E.D.I.T.H. Workflow Agent Ready',
+      detail:
+        'Connected to E.D.I.T.H. Engine (AST Indexer, Strict Diff Engine & Zero-Trust Policy Gateway). Enter a development task below.',
       status: 'completed'
     }
   ]);
 
   const quickActions = [
-    { label: '/fix', text: 'Analyze and fix all policy bypass edge cases in gateway.py' },
-    { label: '/test', text: 'Generate unit tests for diff_generator and execute in runner' },
-    { label: '/refactor', text: 'Refactor TaskDecomposer to add AST graph dependencies' },
-    { label: '/audit', text: 'Perform zero-trust policy audit across repository commands' }
+    { label: '/scan', text: 'Inspect active workspace symbols and summarize architecture' },
+    { label: '/patch', text: 'Preview a safe diff patch for gateway.py policy checks' },
+    { label: '/test', text: 'Prepare pytest verification plan and check command policy' },
+    { label: '/audit', text: 'Analyze diff_generator and summarize patch verification' }
   ];
 
+  const updateBusy = (next) => {
+    setIsBusy(next);
+    if (onBusyChange) onBusyChange(next);
+  };
+
   const handleRunAgent = async (taskText = null) => {
-    const textToRun = (taskText || prompt).trim();
+    const textToRun = (typeof taskText === 'string' ? taskText : prompt).trim();
     if (!textToRun || isBusy) return;
 
-    setPrompt('');
-    setIsBusy(true);
+    if (typeof taskText !== 'string') {
+      setPrompt('');
+    }
+    setError(null);
+    setLastPrompt(textToRun);
+    updateBusy(true);
 
-    // Initial placeholder step
-    const newStep = {
-      step_id: `step_${Date.now()}`,
-      phase: 'thinking',
-      title: 'Reasoning: Decomposing Goals',
-      detail: `Synthesizing strategy for: "${textToRun}"...`,
-      status: 'running'
-    };
-    setAgentSteps(prev => [...prev, newStep]);
+    const pendingId = `step_pending_${Date.now()}`;
+    setAgentSteps((prev) => [
+      ...prev,
+      {
+        step_id: pendingId,
+        phase: 'thinking',
+        title: 'Executing Workspace Workflow...',
+        detail: `Sending instruction to E.D.I.T.H. Engine: "${textToRun}"`,
+        status: 'running'
+      }
+    ]);
 
     try {
-      const res = await fetch('/v1/edith/agent/run', {
+      const res = await apiFetch('/v1/edith/agent/run', {
         method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ prompt: textToRun })
+        body: JSON.stringify({
+          prompt: textToRun,
+          ...(activeFile ? { target_file: activeFile } : {})
+        })
       });
 
-      const steps = await res.json();
-      if (Array.isArray(steps) && steps.length > 0) {
-        setAgentSteps(prev => [...prev.filter(s => s.step_id !== newStep.step_id), ...steps]);
+      const data = await safeParseJson(res);
+      if (!res.ok) {
+        const message = data?.message || data?.detail || `Agent request failed (HTTP ${res.status}).`;
+        throw new Error(message);
       }
-    } catch {
-      // Offline fallback simulation of Claude Code / Codex execution
-      setTimeout(() => {
-        setAgentSteps(prev => [
-          ...prev.filter(s => s.step_id !== newStep.step_id),
-          {
-            step_id: `step_${Date.now()}_1`,
-            phase: 'thinking',
-            title: 'Task Analysis (Claude 3.7 Reasoning)',
-            detail: `Decomposed goal: "${textToRun}". Identified relevant symbol targets.`,
-            status: 'completed'
-          },
-          {
-            step_id: `step_${Date.now()}_2`,
-            phase: 'tool_call',
-            title: 'Tool: indexer.scan_file_tree',
-            detail: 'Parsed 1,935 symbols across services and web applications.',
-            status: 'completed'
-          },
-          {
-            step_id: `step_${Date.now()}_3`,
-            phase: 'patch_proposal',
-            title: 'Patch Synthesized: Unified Diff Ready',
-            detail: 'Generated verified hunk patch for target module.',
-            diff_text: '--- a/gateway.py\n+++ b/gateway.py\n@@ -15,3 +15,5 @@\n+    r"^(pytest)(\\s+.*)?$"',
-            status: 'completed'
-          },
-          {
-            step_id: `step_${Date.now()}_4`,
-            phase: 'tool_call',
-            title: 'Sandbox Verification (Runner Port 8003)',
-            detail: 'Executed automated pytest suite: 4/4 passed (0.40s). Zero regression.',
-            status: 'completed'
-          },
-          {
-            step_id: `step_${Date.now()}_5`,
-            phase: 'complete',
-            title: 'Goal Achieved',
-            detail: 'Autonomous code modification verified cleanly in native sandbox.',
-            status: 'completed'
-          }
-        ]);
-        setIsBusy(false);
-      }, 1400);
-      return;
+
+      if (!Array.isArray(data) || data.length === 0) {
+        throw new Error('E.D.I.T.H. Engine returned an empty workflow response.');
+      }
+
+      setAgentSteps((prev) => [...prev.filter((s) => s.step_id !== pendingId), ...data]);
+    } catch (err) {
+      setAgentSteps((prev) => prev.filter((s) => s.step_id !== pendingId));
+      setError(err?.message || 'Unable to reach E.D.I.T.H. Agent Engine.');
     } finally {
-      setIsBusy(false);
+      updateBusy(false);
     }
   };
 
@@ -132,12 +110,16 @@ export function EdithAgentPanel({
           </div>
           <div>
             <h3 className="text-xs font-bold text-white tracking-wider">AI AGENT</h3>
-            <p className="text-[9px] text-cyan-300">Claude Code / Codex ReAct</p>
+            <p className="text-[9px] text-cyan-300">
+              {activeFile ? `Target: ${activeFile.split('/').pop()}` : 'Workspace Workflow'}
+            </p>
           </div>
         </div>
 
         <button
+          type="button"
           onClick={onClose}
+          aria-label="Close Agent Panel"
           className="p-1 hover:bg-white/10 rounded text-slate-400 hover:text-white transition-colors cursor-pointer"
           title="Close Agent Panel"
         >
@@ -145,12 +127,13 @@ export function EdithAgentPanel({
         </button>
       </div>
 
-      {/* Quick Action Presets (like Claude Code shortcuts) */}
+      {/* Quick Action Presets */}
       <div className="p-2 border-b border-white/10 bg-white/[0.02]">
         <div className="grid grid-cols-2 gap-1.5 font-mono text-[10px]">
-          {quickActions.map((qa, i) => (
+          {quickActions.map((qa) => (
             <button
-              key={i}
+              key={qa.label}
+              type="button"
               onClick={() => handleRunAgent(qa.text)}
               disabled={isBusy}
               className="p-1.5 rounded-lg bg-white/5 hover:bg-cyan-500/10 border border-white/10 hover:border-cyan-400/40 text-left text-slate-300 hover:text-cyan-200 transition-all truncate cursor-pointer disabled:opacity-50"
@@ -163,7 +146,7 @@ export function EdithAgentPanel({
         </div>
       </div>
 
-      {/* Autonomous Execution Stream Feed */}
+      {/* Execution Stream Feed */}
       <div className="flex-1 overflow-y-auto p-3 space-y-3 font-mono text-xs">
         {agentSteps.map((step, idx) => {
           const isPatch = step.phase === 'patch_proposal';
@@ -173,7 +156,7 @@ export function EdithAgentPanel({
 
           return (
             <div
-              key={idx}
+              key={step.step_id || idx}
               className={`p-3 rounded-xl border transition-all ${
                 isDone
                   ? 'bg-emerald-500/10 border-emerald-500/30 text-emerald-200'
@@ -184,25 +167,30 @@ export function EdithAgentPanel({
                   : 'bg-white/[0.02] border-white/10 text-slate-300'
               }`}
             >
-              <div className="flex items-center gap-2 mb-1.5">
-                {isDone && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
-                {isPatch && <FileCode className="w-4 h-4 text-cyan-400 shrink-0" />}
-                {isTool && <Terminal className="w-4 h-4 text-indigo-400 shrink-0" />}
-                {isThinking && <Cpu className="w-4 h-4 text-purple-400 shrink-0" />}
-                <span className="font-bold text-[11px] truncate">{step.title}</span>
+              <div className="flex items-center justify-between gap-2 mb-1.5">
+                <div className="flex items-center gap-2 min-w-0">
+                  {isDone && <CheckCircle2 className="w-4 h-4 text-emerald-400 shrink-0" />}
+                  {isPatch && <FileCode className="w-4 h-4 text-cyan-400 shrink-0" />}
+                  {isTool && <Terminal className="w-4 h-4 text-indigo-400 shrink-0" />}
+                  {isThinking && <Cpu className="w-4 h-4 text-purple-400 shrink-0" />}
+                  <span className="font-bold text-[11px] truncate">{step.title}</span>
+                </div>
+                {step.is_mock && (
+                  <span className="px-1.5 py-0.5 rounded bg-amber-500/15 border border-amber-400/35 text-[9px] text-amber-200 shrink-0">
+                    Preview
+                  </span>
+                )}
               </div>
 
-              <p className="text-[10px] text-slate-400 font-sans leading-relaxed">
-                {step.detail}
-              </p>
+              <p className="text-[10px] text-slate-400 font-sans leading-relaxed">{step.detail}</p>
 
-              {/* One-click Review Diff action button */}
               {isPatch && onOpenDiffReview && (
                 <button
-                  onClick={onOpenDiffReview}
+                  type="button"
+                  onClick={() => onOpenDiffReview(step)}
                   className="mt-2 w-full flex items-center justify-center gap-1.5 py-1 px-2 rounded-lg bg-cyan-500/20 hover:bg-cyan-500/30 border border-cyan-400/40 text-[10px] font-bold text-cyan-200 transition-colors cursor-pointer"
                 >
-                  <span>Review & Apply Patch</span>
+                  <span>Review &amp; Apply Patch</span>
                   <ChevronRight className="w-3 h-3" />
                 </button>
               )}
@@ -212,8 +200,38 @@ export function EdithAgentPanel({
 
         {isBusy && (
           <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-400/30 flex items-center gap-2 text-cyan-300">
-            <RefreshCw className="w-3.5 h-3.5 animate-spin" />
-            <span className="text-[11px]">Autonomous Agent reasoning & executing tools...</span>
+            <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
+            <span className="text-[11px]">Running real engine workflow steps...</span>
+          </div>
+        )}
+
+        {error && (
+          <div
+            role="alert"
+            className="p-3 rounded-xl bg-red-500/15 border border-red-400/40 text-red-200 space-y-2 font-sans"
+          >
+            <div className="flex items-start gap-2 text-xs">
+              <AlertCircle className="w-4 h-4 text-red-400 shrink-0 mt-0.5" />
+              <span>{error}</span>
+            </div>
+            <div className="flex items-center justify-end gap-2">
+              {lastPrompt && (
+                <button
+                  type="button"
+                  onClick={() => handleRunAgent(lastPrompt)}
+                  className="px-2.5 py-1 rounded bg-red-500/25 hover:bg-red-500/40 text-[11px] font-mono text-white cursor-pointer"
+                >
+                  Retry
+                </button>
+              )}
+              <button
+                type="button"
+                onClick={() => setError(null)}
+                className="px-2 py-1 rounded hover:bg-white/10 text-[11px] text-slate-300 cursor-pointer"
+              >
+                Dismiss
+              </button>
+            </div>
           </div>
         )}
       </div>
@@ -232,12 +250,14 @@ export function EdithAgentPanel({
             value={prompt}
             onChange={(e) => setPrompt(e.target.value)}
             disabled={isBusy}
-            placeholder="Instruct AI Agent (e.g. fix test, refactor)..."
+            aria-label="Instruct AI Agent"
+            placeholder="Instruct AI Agent (e.g. inspect gateway)..."
             className="flex-1 bg-transparent border-0 text-xs text-white placeholder-slate-400 focus:outline-none px-2"
           />
           <button
             type="submit"
             disabled={!prompt.trim() || isBusy}
+            aria-label="Run AI Agent"
             className="p-1.5 rounded-lg bg-gradient-to-r from-cyan-500 to-indigo-600 hover:opacity-95 text-white disabled:opacity-30 disabled:cursor-not-allowed transition-all cursor-pointer"
           >
             <Send className="w-3.5 h-3.5" />
@@ -247,4 +267,3 @@ export function EdithAgentPanel({
     </div>
   );
 }
-

@@ -14,11 +14,15 @@ export function EdithCore3D({ size = 130, isBusy = false }) {
     const ctx = canvas.getContext('2d');
     if (!ctx) return;
 
-    let animId;
+    const motionQuery =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+    let reducedMotion = Boolean(motionQuery?.matches);
+    let animId = 0;
     let time = 0;
 
-    const render = () => {
-      time += isBusy ? 0.04 : 0.018;
+    const drawFrame = () => {
       const width = canvas.width;
       const height = canvas.height;
       const cx = width / 2;
@@ -141,14 +145,53 @@ export function EdithCore3D({ size = 130, isBusy = false }) {
       ctx.strokeStyle = `rgba(34, 211, 238, ${0.7 * (1 - pulsePhase)})`;
       ctx.lineWidth = 1.5;
       ctx.stroke();
-
-      animId = requestAnimationFrame(render);
     };
 
-    render();
+    const scheduleNext = () => {
+      if (reducedMotion || (typeof document !== 'undefined' && document.hidden)) {
+        return;
+      }
+      animId = requestAnimationFrame(() => {
+        time += isBusy ? 0.04 : 0.018;
+        drawFrame();
+        scheduleNext();
+      });
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.hidden) {
+        cancelAnimationFrame(animId);
+      } else {
+        drawFrame();
+        scheduleNext();
+      }
+    };
+
+    const handleMotionChange = (event) => {
+      reducedMotion = event.matches;
+      cancelAnimationFrame(animId);
+      drawFrame();
+      scheduleNext();
+    };
+
+    drawFrame();
+    scheduleNext();
+
+    if (typeof document !== 'undefined') {
+      document.addEventListener('visibilitychange', handleVisibilityChange);
+    }
+    if (motionQuery?.addEventListener) {
+      motionQuery.addEventListener('change', handleMotionChange);
+    }
 
     return () => {
       cancelAnimationFrame(animId);
+      if (typeof document !== 'undefined') {
+        document.removeEventListener('visibilitychange', handleVisibilityChange);
+      }
+      if (motionQuery?.removeEventListener) {
+        motionQuery.removeEventListener('change', handleMotionChange);
+      }
     };
   }, [isBusy]);
 

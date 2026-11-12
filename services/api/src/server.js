@@ -1,5 +1,6 @@
 import { app } from './app.js';
 import { config } from './config/index.js';
+import { prisma } from './repositories/prisma.js';
 import { logger } from './utils/logger.js';
 
 const server = app.listen(config.PORT, config.HOST, () => {
@@ -8,10 +9,15 @@ const server = app.listen(config.PORT, config.HOST, () => {
 });
 
 // Graceful shutdown handling
-function shutdown(signal) {
+async function shutdown(signal) {
   logger.info(`${signal} signal received: closing HTTP server...`);
-  server.close(() => {
-    logger.info('HTTP server closed cleanly.');
+  server.close(async () => {
+    try {
+      await prisma.$disconnect();
+    } catch (err) {
+      logger.error({ err: err?.message }, 'Error disconnecting Prisma client during shutdown');
+    }
+    logger.info('HTTP server and database connections closed cleanly.');
     process.exit(0);
   });
 

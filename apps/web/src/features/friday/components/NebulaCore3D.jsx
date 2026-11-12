@@ -17,7 +17,7 @@ export function NebulaCore3D({ isStreaming }) {
       <div className="relative w-44 h-44 flex items-center justify-center">
         {/* Ring 1 - Outer Cyan Dashed Reticle */}
         <div
-          className={`absolute inset-0 rounded-full border border-cyan-400/40 border-dashed ${
+          className={`absolute inset-0 rounded-full border border-cyan-400/40 border-dashed motion-reduce:animate-none ${
             isStreaming ? 'animate-spin' : 'animate-spin-slow'
           }`}
           style={{ animationDuration: isStreaming ? '8s' : '28s' }}
@@ -25,13 +25,13 @@ export function NebulaCore3D({ isStreaming }) {
 
         {/* Ring 2 - Reverse Violet Tilted Ring */}
         <div
-          className="absolute w-36 h-36 rounded-full border-2 border-violet-500/40 border-t-transparent border-b-cyan-400/60 animate-spin"
+          className="absolute w-36 h-36 rounded-full border-2 border-violet-500/40 border-t-transparent border-b-cyan-400/60 animate-spin motion-reduce:animate-none"
           style={{ animationDuration: isStreaming ? '5s' : '18s', animationDirection: 'reverse' }}
         />
 
         {/* Ring 3 - Innermost Glowing Accent Ring */}
         <div
-          className="absolute w-28 h-28 rounded-full border border-pink-400/30 border-l-transparent animate-spin"
+          className="absolute w-28 h-28 rounded-full border border-pink-400/30 border-l-transparent animate-spin motion-reduce:animate-none"
           style={{ animationDuration: '12s' }}
         />
 
@@ -44,7 +44,7 @@ export function NebulaCore3D({ isStreaming }) {
           }`}
         >
           {/* Inner Light Pulse */}
-          <div className="absolute inset-1 rounded-full bg-white/20 blur-sm animate-pulse" />
+          <div className="absolute inset-1 rounded-full bg-white/20 blur-sm animate-pulse motion-reduce:animate-none" />
           <Sparkles className="relative z-10 w-9 h-9 text-white drop-shadow-[0_0_10px_rgba(255,255,255,0.8)]" />
         </div>
       </div>

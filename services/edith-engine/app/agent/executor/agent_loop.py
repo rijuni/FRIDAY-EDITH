@@ -1,13 +1,11 @@
-import os
-import re
-import json
-import asyncio
 from typing import List, Dict, Any, Optional, AsyncGenerator
 from pydantic import BaseModel, Field
 
+from app.agent.planner.decomposer import TaskDecomposer
 from app.agent.policies.gateway import CommandPolicyGateway
 from app.patching.diff_generator import DiffEngine
-from app.repository.indexer import RepositoryIndexer
+from app.repository.indexer import RepositoryIndexer, IndexedFile
+
 
 class AgentStep(BaseModel):
     step_id: str
@@ -18,119 +16,153 @@ class AgentStep(BaseModel):
     tool_args: Dict[str, Any] = Field(default_factory=dict)
     tool_output: Optional[str] = None
     diff_text: Optional[str] = None
+    file_path: Optional[str] = None
+    original_content: Optional[str] = None
+    modified_content: Optional[str] = None
+    is_mock: bool = False
     status: str = "completed"  # "pending" | "running" | "completed" | "failed"
 
-class EdithCodingAgent:
-    """Autonomous ReAct Coding Agent matching Claude Code & Codex capabilities."""
 
-    def __init__(self, workspace_root: str = "M:\\Friday-Edith"):
-        self.workspace_root = workspace_root
+class EdithCodingAgent:
+    """Workspace-aware coding workflow coordinator backed by real Indexer, DiffEngine & PolicyGateway."""
+
+    def __init__(self, indexer: Optional[RepositoryIndexer] = None):
+        self.decomposer = TaskDecomposer()
         self.policy_gateway = CommandPolicyGateway()
         self.diff_engine = DiffEngine()
-        self.indexer = RepositoryIndexer()
+        self.indexer = indexer or RepositoryIndexer()
 
-    async def execute_task_stream(self, prompt: str) -> AsyncGenerator[AgentStep, None]:
-        lower_prompt = prompt.lower()
+    def _select_target_file(
+        self,
+        prompt: str,
+        indexed_files: List[IndexedFile],
+        requested_target: Optional[str],
+    ) -> Optional[str]:
+        if requested_target:
+            return requested_target
+
+        keywords = [w.lower() for w in prompt.split() if len(w) > 3]
+        for item in indexed_files:
+            lower_path = item.relative_path.lower()
+            if any(k in lower_path for k in keywords) and item.extension in (".py", ".js", ".jsx", ".ts", ".tsx"):
+                return item.relative_path
+
+        for item in indexed_files:
+            if item.extension in (".py", ".js", ".jsx", ".ts", ".tsx"):
+                return item.relative_path
+        return indexed_files[0].relative_path if indexed_files else None
+
+    async def execute_task_stream(
+        self,
+        prompt: str,
+        workspace_root: Optional[str] = None,
+        target_file: Optional[str] = None,
+    ) -> AsyncGenerator[AgentStep, None]:
+        resolved_root = str(self.indexer.resolve_workspace_root(workspace_root))
         step_idx = 1
 
-        # Phase 1: Problem Formulation & Planning (Thought)
+        # 1. Task decomposition (honest preview without LLM key)
+        plan = self.decomposer.decompose(goal=prompt, workspace_root=resolved_root)
         yield AgentStep(
             step_id=f"step_{step_idx}",
             phase="thinking",
-            title="Reasoning: Task Decomposition",
-            detail=f"Analyzing intent for prompt: '{prompt}'. Formulating autonomous execution plan...",
-            status="completed"
+            title=f"Plan Decomposed ({plan.total_steps} steps)",
+            detail=f"Prepared workflow plan #{plan.plan_id} for: '{prompt}'.",
+            is_mock=True,
+            status="completed",
         )
         step_idx += 1
-        await asyncio.sleep(0.3)
 
-        # Phase 2: Tool Call - Context Exploration / AST Indexing
-        yield AgentStep(
-            step_id=f"step_{step_idx}",
-            phase="tool_call",
-            title="Tool Execution: search_codebase",
-            tool_name="indexer.scan_file_tree",
-            tool_args={"workspace": self.workspace_root, "filter": "python/javascript"},
-            detail="Scanning AST syntax trees and symbol definitions...",
-            status="running"
-        )
-        await asyncio.sleep(0.5)
-
-        files = self.indexer.scan_file_tree(self.workspace_root, max_files=15)
-        file_summary = f"Indexed {len(files)} source files. Key symbols extracted."
+        # 2. Real workspace scan via RepositoryIndexer
+        indexed_files = self.indexer.scan_file_tree(resolved_root, max_files=60)
+        total_symbols = sum(len(f.symbols) for f in indexed_files)
         yield AgentStep(
             step_id=f"step_{step_idx}",
             phase="tool_result",
-            title="Tool Output: AST Index Ready",
+            title=f"Workspace Indexed: {len(indexed_files)} files, {total_symbols} AST symbols",
             tool_name="indexer.scan_file_tree",
-            tool_output=file_summary,
-            detail=file_summary,
-            status="completed"
+            tool_args={"workspace_root": resolved_root, "max_files": 60},
+            tool_output=f"Scanned {len(indexed_files)} files ({total_symbols} Python AST symbols).",
+            detail=f"Scanned {len(indexed_files)} allowlisted files extracting {total_symbols} top-level AST symbols.",
+            status="completed",
         )
         step_idx += 1
 
-        # Phase 3: Tool Call - File Reading & Patch Synthesis
-        target_file = "services/edith-engine/app/agent/policies/gateway.py"
-        yield AgentStep(
-            step_id=f"step_{step_idx}",
-            phase="tool_call",
-            title=f"Tool Execution: read_file('{target_file}')",
-            tool_name="read_file",
-            tool_args={"path": target_file},
-            detail=f"Inspecting existing implementation in {target_file}...",
-            status="completed"
-        )
-        step_idx += 1
-        await asyncio.sleep(0.4)
+        # 3. Inspect real target file & synthesize verified unified diff preview
+        chosen_file = self._select_target_file(prompt, indexed_files, target_file)
+        if chosen_file:
+            file_data = self.indexer.read_workspace_file(resolved_root, chosen_file)
+            orig_content = file_data["content"]
+            yield AgentStep(
+                step_id=f"step_{step_idx}",
+                phase="tool_result",
+                title=f"Inspected: {chosen_file} ({file_data['size_bytes']} B)",
+                tool_name="indexer.read_workspace_file",
+                tool_args={"path": chosen_file},
+                tool_output=f"Checksum SHA-256: {file_data['checksum'][:16]}...",
+                detail=f"Loaded real workspace file {chosen_file} for diff synthesis.",
+                status="completed",
+            )
+            step_idx += 1
 
-        # Phase 4: Patch Generation (Claude Code / Codex Diff Generation)
-        sample_orig = "class CommandPolicyGateway:\n    SAFE_PATTERNS = [\n        r\"^(git\\s+(status|diff))(\\s+.*)?$\"\n    ]"
-        sample_mod = "class CommandPolicyGateway:\n    SAFE_PATTERNS = [\n        r\"^(git\\s+(status|diff|log|branch|show))(\\s+.*)?$\",\n        r\"^(npm\\s+(test|run\\s+test))(\\s+.*)?$\",\n        r\"^(pytest)(\\s+.*)?$\"\n    ]"
-        diff_res = self.diff_engine.generate_diff("gateway.py", sample_orig, sample_mod)
+            # Synthesize a non-destructive preview annotation diff and round-trip verify with apply_patch
+            comment_prefix = "#" if chosen_file.endswith(".py") else "//"
+            preview_note = f"{comment_prefix} [E.D.I.T.H. Preview Note]: Task '{prompt[:60]}'"
+            mod_content = (
+                orig_content
+                if orig_content.startswith(preview_note)
+                else f"{preview_note}\n{orig_content}"
+            )
+            diff_res = self.diff_engine.generate_diff(chosen_file, orig_content, mod_content)
+            # Self-check patch applicability before proposing
+            verified_patched = self.diff_engine.apply_patch(orig_content, diff_res.diff_text)
+            if verified_patched != mod_content:
+                raise ValueError("Generated patch failed self-verification round trip.")
 
-        yield AgentStep(
-            step_id=f"step_{step_idx}",
-            phase="patch_proposal",
-            title="Patch Synthesized: Unified Diff Generated",
-            detail=f"Generated {diff_res.hunks_count} verified hunk edits for {target_file}.",
-            diff_text=diff_res.diff_text,
-            status="completed"
-        )
-        step_idx += 1
-        await asyncio.sleep(0.4)
+            yield AgentStep(
+                step_id=f"step_{step_idx}",
+                phase="patch_proposal",
+                title=f"Patch Preview Ready: {chosen_file}",
+                detail=(
+                    f"[Simulated Patch Preview] Generated {diff_res.hunks_count} verified hunk(s) "
+                    f"for {chosen_file}. Open Diff Review to inspect or apply cleanly."
+                ),
+                diff_text=diff_res.diff_text,
+                file_path=chosen_file,
+                original_content=orig_content,
+                modified_content=mod_content,
+                is_mock=True,
+                status="completed",
+            )
+            step_idx += 1
 
-        # Phase 5: Self-Healing Test Verification in Isolated Runner (Claude Code loop)
-        test_cmd = "pytest services/edith-engine/app/tests"
-        policy = self.policy_gateway.evaluate(test_cmd)
-
-        yield AgentStep(
-            step_id=f"step_{step_idx}",
-            phase="tool_call",
-            title="Tool Execution: run_sandbox_verification",
-            tool_name="runner.execute",
-            tool_args={"command": test_cmd, "policy_risk": policy.risk_score},
-            detail=f"Running automated test verification in native runner sandbox (Policy: {policy.decision})...",
-            status="running"
-        )
-        await asyncio.sleep(0.6)
-
+        # 4. Real Policy Gateway classification for verification command (no fabricated test passes)
+        verify_cmd = "npm test" if "npm" in prompt.lower() else "pytest"
+        policy = self.policy_gateway.evaluate(verify_cmd)
         yield AgentStep(
             step_id=f"step_{step_idx}",
             phase="tool_result",
-            title="Sandbox Verification: PASSED",
-            tool_name="runner.execute",
-            tool_output="✓ test_task_decomposer PASSED\n✓ test_policy_gateway_classification PASSED\n✓ test_diff_engine PASSED\n==================== 3 passed in 0.38s ====================",
-            detail="All tests passed. Zero regression detected in runner sandbox.",
-            status="completed"
+            title=f"Verification Policy: {policy.decision}",
+            tool_name="policy_gateway.evaluate",
+            tool_args={"command": verify_cmd},
+            tool_output=f"Command `{verify_cmd}` classified as {policy.decision} (risk {policy.risk_score}/100): {policy.reason}",
+            detail=(
+                f"Prepared verification command `{verify_cmd}` ({policy.decision}). "
+                f"Run it explicitly in the Sandbox Terminal to execute live tests."
+            ),
+            status="pending",
         )
         step_idx += 1
 
-        # Phase 6: Final Completion & Summary
         yield AgentStep(
             step_id=f"step_{step_idx}",
             phase="complete",
-            title="Task Successfully Executed",
-            detail=f"Autonomous coding cycle complete for: '{prompt}'. 1 file modified, verified in sandbox runner.",
-            status="completed"
+            title="Workflow Analysis Complete",
+            detail=(
+                f"Indexed {len(indexed_files)} workspace files and prepared a verified diff preview"
+                + (f" for {chosen_file}." if chosen_file else ".")
+                + " Configure a live coding model provider for autonomous multi-file edits."
+            ),
+            is_mock=True,
+            status="completed",
         )
-

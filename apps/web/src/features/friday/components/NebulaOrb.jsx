@@ -1,24 +1,38 @@
-import React, { useEffect, useRef } from 'react';
+import React, { useEffect, useRef, useState } from 'react';
 
 /**
  * NebulaOrb - Realistic 3D Cosmic Plasma Orb
  * Renders an animated cosmic plasma sphere with swirling nebula gas, internal stars,
- * iridescent specular sheen, and an ambient outer glow halo matching the reference design.
+ * iridescent specular sheen, and an ambient outer glow halo.
+ * Supports prefers-reduced-motion, hidden-tab pausing, and CSS fallback if 2D canvas fails.
  */
 export function NebulaOrb({ isStreaming = false, size = 120 }) {
   const canvasRef = useRef(null);
+  const [canvasUnavailable, setCanvasUnavailable] = useState(false);
 
   useEffect(() => {
     const canvas = canvasRef.current;
     if (!canvas) return;
-    const ctx = canvas.getContext('2d');
-    if (!ctx) return;
+    let ctx = null;
+    try {
+      ctx = canvas.getContext('2d');
+    } catch {
+      ctx = null;
+    }
+    if (!ctx) {
+      setCanvasUnavailable(true);
+      return;
+    }
 
-    let animationFrameId;
+    const prefersReducedMotion =
+      typeof window !== 'undefined' &&
+      typeof window.matchMedia === 'function' &&
+      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+
+    let animationFrameId = null;
     let time = 0;
 
-    const render = () => {
-      time += isStreaming ? 0.04 : 0.015;
+    const drawFrame = () => {
       const width = canvas.width;
       const height = canvas.height;
       const cx = width / 2;
@@ -43,15 +57,14 @@ export function NebulaOrb({ isStreaming = false, size = 120 }) {
       ctx.arc(cx, cy, radius, 0, Math.PI * 2);
       ctx.clip();
 
-      // Base deep space fill
       const baseGrad = ctx.createRadialGradient(cx - radius * 0.3, cy - radius * 0.3, radius * 0.1, cx, cy, radius);
-      baseGrad.addColorStop(0, '#3b0764'); // deep violet
-      baseGrad.addColorStop(0.6, '#1e1b4b'); // deep indigo
-      baseGrad.addColorStop(1, '#05020c'); // space black
+      baseGrad.addColorStop(0, '#3b0764');
+      baseGrad.addColorStop(0.6, '#1e1b4b');
+      baseGrad.addColorStop(1, '#05020c');
       ctx.fillStyle = baseGrad;
       ctx.fillRect(0, 0, width, height);
 
-      // 3. Swirling Cosmic Plasma Clouds (Simulating FBM Noise)
+      // 3. Swirling Cosmic Plasma Clouds
       for (let i = 0; i < 4; i++) {
         const angle = time * (0.8 + i * 0.3) + (i * Math.PI) / 2;
         const dist = radius * (0.35 + 0.15 * Math.sin(time + i));
@@ -60,15 +73,15 @@ export function NebulaOrb({ isStreaming = false, size = 120 }) {
 
         const plasmaGrad = ctx.createRadialGradient(px, py, 2, px, py, radius * 0.75);
         if (i % 3 === 0) {
-          plasmaGrad.addColorStop(0, 'rgba(244, 114, 182, 0.85)'); // radiant pink
-          plasmaGrad.addColorStop(0.5, 'rgba(217, 70, 239, 0.4)'); // fuchsia
+          plasmaGrad.addColorStop(0, 'rgba(244, 114, 182, 0.85)');
+          plasmaGrad.addColorStop(0.5, 'rgba(217, 70, 239, 0.4)');
           plasmaGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         } else if (i % 3 === 1) {
-          plasmaGrad.addColorStop(0, 'rgba(147, 51, 234, 0.8)'); // electric violet
-          plasmaGrad.addColorStop(0.5, 'rgba(99, 102, 241, 0.35)'); // indigo
+          plasmaGrad.addColorStop(0, 'rgba(147, 51, 234, 0.8)');
+          plasmaGrad.addColorStop(0.5, 'rgba(99, 102, 241, 0.35)');
           plasmaGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         } else {
-          plasmaGrad.addColorStop(0, 'rgba(56, 189, 248, 0.75)'); // bright cyan
+          plasmaGrad.addColorStop(0, 'rgba(56, 189, 248, 0.75)');
           plasmaGrad.addColorStop(0.6, 'rgba(59, 130, 246, 0.3)');
           plasmaGrad.addColorStop(1, 'rgba(0, 0, 0, 0)');
         }
@@ -82,13 +95,13 @@ export function NebulaOrb({ isStreaming = false, size = 120 }) {
       for (let s = 0; s < 18; s++) {
         const sx = cx + Math.sin(s * 13 + time * 0.5) * (radius * 0.75);
         const sy = cy + Math.cos(s * 7 + time * 0.7) * (radius * 0.75);
-        const size = (Math.sin(s + time * 2) + 1.2) * 0.8;
+        const pSize = (Math.sin(s + time * 2) + 1.2) * 0.8;
         ctx.beginPath();
-        ctx.arc(sx, sy, size, 0, Math.PI * 2);
+        ctx.arc(sx, sy, pSize, 0, Math.PI * 2);
         ctx.fill();
       }
 
-      // 5. 3D Specular Spherical Rim Lighting (Fresnel Glow)
+      // 5. 3D Specular Spherical Rim Lighting
       const rimGrad = ctx.createRadialGradient(cx, cy, radius * 0.82, cx, cy, radius);
       rimGrad.addColorStop(0, 'rgba(255, 255, 255, 0)');
       rimGrad.addColorStop(0.8, 'rgba(244, 114, 182, 0.6)');
@@ -112,14 +125,27 @@ export function NebulaOrb({ isStreaming = false, size = 120 }) {
       ctx.fillRect(0, 0, width, height);
 
       ctx.restore();
-
-      animationFrameId = requestAnimationFrame(render);
     };
 
-    render();
+    const renderLoop = () => {
+      if (document.visibilityState === 'hidden') {
+        animationFrameId = requestAnimationFrame(renderLoop);
+        return;
+      }
+      time += isStreaming ? 0.04 : 0.015;
+      drawFrame();
+      animationFrameId = requestAnimationFrame(renderLoop);
+    };
+
+    drawFrame();
+    if (!prefersReducedMotion) {
+      animationFrameId = requestAnimationFrame(renderLoop);
+    }
 
     return () => {
-      cancelAnimationFrame(animationFrameId);
+      if (animationFrameId !== null) {
+        cancelAnimationFrame(animationFrameId);
+      }
     };
   }, [isStreaming]);
 
@@ -137,13 +163,25 @@ export function NebulaOrb({ isStreaming = false, size = 120 }) {
           transform: isStreaming ? 'scale(1.2)' : 'scale(1)'
         }}
       />
-      <canvas
-        ref={canvasRef}
-        width={(size + 32) * 2}
-        height={(size + 32) * 2}
-        style={{ width: size + 32, height: size + 32 }}
-        className="relative z-10 cursor-pointer drop-shadow-[0_0_20px_rgba(236,72,153,0.5)]"
-      />
+      {canvasUnavailable ? (
+        <div
+          aria-label="F.R.I.D.A.Y. Nebula Orb"
+          className="relative z-10 rounded-full border border-purple-400/40 shadow-[0_0_25px_rgba(236,72,153,0.5)]"
+          style={{
+            width: size,
+            height: size,
+            background: 'radial-gradient(circle at 30% 30%, rgba(244,114,182,0.85), rgba(109,40,217,0.9) 55%, #090418 100%)'
+          }}
+        />
+      ) : (
+        <canvas
+          ref={canvasRef}
+          width={(size + 32) * 2}
+          height={(size + 32) * 2}
+          style={{ width: size + 32, height: size + 32 }}
+          className="relative z-10 cursor-pointer drop-shadow-[0_0_20px_rgba(236,72,153,0.5)]"
+        />
+      )}
     </div>
   );
 }

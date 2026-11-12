@@ -13,6 +13,19 @@ export const apiLimiter = rateLimit({
   }
 });
 
+// Differentiated rate limiter for chat streaming operations
+export const chatLimiter = rateLimit({
+  windowMs: 5 * 60 * 1000, // 5 minutes
+  max: 120,
+  standardHeaders: true,
+  legacyHeaders: false,
+  message: {
+    status: 'fail',
+    statusCode: 429,
+    message: 'Too many chat requests in a short window, please slow down.'
+  }
+});
+
 // Stricter rate limiter for sensitive authentication endpoints (prevent brute-forcing)
 export const authLimiter = rateLimit({
   windowMs: 15 * 60 * 1000, // 15 minutes

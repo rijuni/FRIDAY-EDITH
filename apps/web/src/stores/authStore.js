@@ -1,6 +1,6 @@
 import { create } from 'zustand';
-import { apiFetch, safeParseJson } from '../lib/apiClient';
-import { useFridayStore } from './fridayStore';
+import { apiFetch, safeParseJson } from '../lib/apiClient.js';
+import { useFridayStore } from './fridayStore.js';
 
 /**
  * Memory-only session mirror backed by HttpOnly auth cookies on the Node API.
@@ -44,7 +44,7 @@ export const useAuthStore = create((set) => ({
     } catch {
       // Still clear local session mirror if API call fails
     } finally {
-      useFridayStore.getState().newChat();
+      useFridayStore.getState().resetState();
       set({ user: null, isAuthenticated: false, isCheckingSession: false });
     }
   }

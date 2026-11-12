@@ -1,24 +1,13 @@
 import React from 'react';
 import Editor from '@monaco-editor/react';
+import { getMonacoLanguage } from '../utils/language';
 
 export function MonacoCodeEditor({
-  filename = 'decomposer.py',
+  filename = 'untitled.txt',
   code = '',
   onChange,
   readOnly = false
 }) {
-  // Determine language based on extension
-  const getLanguage = (fname) => {
-    if (fname.endsWith('.py')) return 'python';
-    if (fname.endsWith('.js') || fname.endsWith('.jsx')) return 'javascript';
-    if (fname.endsWith('.ts') || fname.endsWith('.tsx')) return 'typescript';
-    if (fname.endsWith('.json')) return 'json';
-    if (fname.endsWith('.css')) return 'css';
-    if (fname.endsWith('.html')) return 'html';
-    if (fname.endsWith('.ps1')) return 'powershell';
-    if (fname.endsWith('.md')) return 'markdown';
-    return 'plaintext';
-  };
 
   const handleEditorWillMount = (monaco) => {
     // Define custom Stark Tactical Cyberpunk theme
@@ -49,7 +38,7 @@ export function MonacoCodeEditor({
     <div className="w-full h-full overflow-hidden bg-[#070a12]">
       <Editor
         height="100%"
-        language={getLanguage(filename)}
+        language={getMonacoLanguage(filename)}
         value={code}
         theme="edith-cyber"
         beforeMount={handleEditorWillMount}

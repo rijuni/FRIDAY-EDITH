@@ -4,11 +4,16 @@
   "private": true,
   "type": "module",
   "main": "src/server.js",
+  "prisma": {
+    "seed": "node prisma/seed/seed.js"
+  },
   "scripts": {
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "prisma:generate": "prisma generate",
     "prisma:migrate:dev": "prisma migrate dev",
+    "prisma:seed": "node prisma/seed/seed.js",
+    "db:validate:mysql": "node scripts/validate-mysql-compat.js",
     "test": "node --test src/tests/*.test.js"
   },
   "dependencies": {

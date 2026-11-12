@@ -2,7 +2,6 @@ import React, { useState, useRef, useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import {
   Sparkles,
-  Send,
   Terminal,
   Paperclip,
   Mic,
@@ -20,7 +19,13 @@ import {
   ArrowUp,
   LogOut,
   PanelLeftClose,
-  PanelLeftOpen
+  PanelLeftOpen,
+  Trash2,
+  Square,
+  RotateCcw,
+  AlertCircle,
+  X,
+  Loader2
 } from 'lucide-react';
 import { useFridayStore } from '../../../stores/fridayStore';
 import { useAuthStore } from '../../../stores/authStore';
@@ -32,19 +37,35 @@ export function FridayDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const {
     conversations,
+    pagination,
+    activeConversationId,
     messages,
     selectedModel,
     setModel,
-    appendMessage,
+    isLoadingConversations,
+    isLoadingMessages,
     isStreaming,
     streamBuffer,
-    startStreaming,
-    updateStreamBuffer,
-    finishStreaming
+    isMockResponse,
+    error,
+    lastFailedPrompt,
+    clearError,
+    newChat,
+    fetchConversations,
+    selectConversation,
+    deleteConversation,
+    cancelStreaming,
+    sendMessage,
+    retryLastMessage
   } = useFridayStore();
 
   const [input, setInput] = useState('');
+  const [featureNotice, setFeatureNotice] = useState(null);
   const messagesEndRef = useRef(null);
+
+  useEffect(() => {
+    fetchConversations();
+  }, [fetchConversations]);
 
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
@@ -52,68 +73,18 @@ export function FridayDashboard() {
 
   useEffect(() => {
     scrollToBottom();
-  }, [messages, streamBuffer]);
+  }, [messages, streamBuffer, isLoadingMessages]);
 
   const handleSend = async (directText = null) => {
     const promptText = (typeof directText === 'string' ? directText : input).trim();
     if (!promptText || isStreaming) return;
 
-    setInput('');
-    appendMessage({ role: 'user', content: promptText });
-    startStreaming();
-
-    try {
-      const response = await fetch('/v1/chat/stream', {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({
-          model: selectedModel,
-          messages: [...messages, { role: 'user', content: promptText }],
-          system_prompt: 'You are F.R.I.D.A.Y., a high-intelligence AI assistant running on Nebula UI.'
-        })
-      });
-
-      if (!response.ok) throw new Error('Stream request failed');
-
-      const reader = response.body.getReader();
-      const decoder = new TextDecoder();
-
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-
-        const text = decoder.decode(value, { stream: true });
-        const lines = text.split('\n');
-        for (const line of lines) {
-          if (line.startsWith('data: ')) {
-            try {
-              const data = JSON.parse(line.substring(6));
-              if (data.event === 'chunk' && data.text) {
-                updateStreamBuffer(data.text);
-              }
-            } catch {
-              // ignore partial lines
-            }
-          }
-        }
-      }
-    } catch {
-      updateStreamBuffer(
-        `F.R.I.D.A.Y. cognitive core verified. I have synthesized your request: "${promptText}". ` +
-        `The platform is actively connected to the secure Node.js persistence API and Python intelligence engine.`
-      );
-    } finally {
-      finishStreaming();
+    if (typeof directText !== 'string') {
+      setInput('');
     }
+    setFeatureNotice(null);
+    await sendMessage(promptText);
   };
-
-  const sampleRecentItems = [
-    "Explain the Code",
-    "Kyoto Solo Trip Itinerary",
-    "Podcast Ideas: Sustainable Tech",
-    "Debugging JavaScript snippet",
-    "How to share my car safely"
-  ];
 
   const quickCards = [
     {
@@ -186,7 +157,11 @@ export function FridayDashboard() {
 
             {/* Glowing "+ New Chat" Button */}
             <button
-              onClick={() => window.location.reload()}
+              type="button"
+              onClick={() => {
+                newChat();
+                setFeatureNotice(null);
+              }}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-xs font-semibold text-white shadow-lg shadow-purple-600/30 border border-white/20 transition-all mb-6 cursor-pointer"
             >
               <Plus className="w-4 h-4 text-white" />
@@ -197,30 +172,93 @@ export function FridayDashboard() {
             <div className="flex-1 overflow-y-auto space-y-1 pr-1">
               <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 px-2 mb-2">
                 <span>Recent</span>
+                {isLoadingConversations && (
+                  <Loader2 className="w-3 h-3 text-purple-300 animate-spin" aria-label="Loading conversations" />
+                )}
               </div>
-              {sampleRecentItems.map((item, idx) => (
+
+              {conversations.length === 0 && !isLoadingConversations ? (
+                <p className="px-3 py-2 text-[11px] text-slate-500 italic">
+                  No saved conversations yet. Start a prompt below.
+                </p>
+              ) : (
+                conversations.map((conv) => {
+                  const isActive = conv.id === activeConversationId;
+                  return (
+                    <div
+                      key={conv.id}
+                      role="group"
+                      className={`w-full flex items-center gap-1.5 rounded-xl border transition-all group ${
+                        isActive
+                          ? 'bg-purple-500/20 border-purple-400/40 text-white'
+                          : 'border-transparent hover:bg-white/[0.08] hover:border-white/10 text-slate-300 hover:text-white'
+                      }`}
+                    >
+                      <button
+                        type="button"
+                        onClick={() => {
+                          setFeatureNotice(null);
+                          selectConversation(conv.id);
+                        }}
+                        className="flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2 text-left text-xs truncate cursor-pointer"
+                      >
+                        <MessageSquare
+                          className={`w-3.5 h-3.5 shrink-0 ${
+                            isActive ? 'text-purple-300' : 'text-slate-400 group-hover:text-purple-300'
+                          }`}
+                        />
+                        <span className="truncate">{conv.title || 'Untitled Conversation'}</span>
+                      </button>
+                      <button
+                        type="button"
+                        onClick={() => deleteConversation(conv.id)}
+                        aria-label={`Delete ${conv.title || 'conversation'}`}
+                        title="Delete conversation"
+                        className="p-1.5 mr-1 rounded-lg text-slate-500 hover:text-red-300 hover:bg-red-500/15 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity cursor-pointer"
+                      >
+                        <Trash2 className="w-3.5 h-3.5" />
+                      </button>
+                    </div>
+                  );
+                })
+              )}
+
+              {pagination?.hasMore && (
                 <button
-                  key={idx}
-                  onClick={() => handleSend(item)}
-                  className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl text-left text-xs text-slate-300 hover:bg-white/[0.08] hover:text-white border border-transparent hover:border-white/10 transition-all truncate group cursor-pointer"
+                  type="button"
+                  disabled={isLoadingConversations}
+                  onClick={() => fetchConversations({ append: true })}
+                  className="w-full text-left px-3 py-1.5 text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer disabled:opacity-50"
                 >
-                  <MessageSquare className="w-3.5 h-3.5 text-slate-400 group-hover:text-purple-300 shrink-0" />
-                  <span className="truncate">{item}</span>
+                  <span>{isLoadingConversations ? 'Loading...' : 'Load more'}</span>
+                  <ChevronDown className="w-3 h-3" />
                 </button>
-              ))}
-              <button className="w-full text-left px-3 py-1.5 text-[11px] text-slate-400 hover:text-slate-200 flex items-center gap-1 cursor-pointer">
-                <span>More</span>
-                <ChevronDown className="w-3 h-3" />
-              </button>
+              )}
             </div>
 
             {/* Bottom Settings & Glass Telemetry Banner */}
             <div className="pt-4 border-t border-white/10 space-y-2 text-xs text-slate-400">
-              <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-300 hover:text-white transition-colors cursor-pointer">
+              <button
+                type="button"
+                onClick={() =>
+                  setFeatureNotice(
+                    `Signed in as ${user?.email || 'authenticated user'}. Workspace preferences use your active session cookie.`
+                  )
+                }
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
                 <Settings className="w-4 h-4 text-slate-400" />
                 <span>Settings</span>
               </button>
-              <button className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-300 hover:text-white transition-colors cursor-pointer">
+              <button
+                type="button"
+                onClick={() =>
+                  setFeatureNotice(
+                    'F.R.I.D.A.Y. is routed through the Node.js persistence API to the Python intelligence runtime. Switch to E.D.I.T.H. // IDE for code tasks.'
+                  )
+                }
+                className="w-full flex items-center gap-2.5 px-3 py-2 rounded-xl hover:bg-white/[0.06] text-slate-300 hover:text-white transition-colors cursor-pointer"
+              >
                 <HelpCircle className="w-4 h-4 text-slate-400" />
                 <span>Help & Updates</span>
               </button>
@@ -278,6 +316,7 @@ export function FridayDashboard() {
                 <div className="flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-pill hover:border-purple-400/50 text-xs text-slate-200 transition-colors cursor-pointer">
                   <span className="w-2 h-2 rounded-full bg-purple-400 animate-pulse shadow-[0_0_8px_#c084fc]" />
                   <select
+                    aria-label="Select model"
                     value={selectedModel}
                     onChange={(e) => setModel(e.target.value)}
                     className="bg-transparent border-0 text-xs text-slate-200 focus:outline-none cursor-pointer pr-1"
@@ -288,12 +327,22 @@ export function FridayDashboard() {
                   </select>
                   <ChevronDown className="w-3 h-3 text-slate-400" />
                 </div>
+
+                {(isMockResponse || messages.some((m) => m.isMock)) && (
+                  <span
+                    className="px-2.5 py-1 rounded-full bg-amber-500/15 border border-amber-400/35 text-[10px] font-mono text-amber-200 tracking-wide"
+                    title="Responses are currently generated by the local MockProvider because no live upstream LLM API key is configured."
+                  >
+                    Local Simulation
+                  </span>
+                )}
               </div>
             </div>
 
             {/* Right Action Buttons: E.D.I.T.H. Switcher */}
             <div className="flex items-center gap-3">
               <button
+                type="button"
                 onClick={() => navigate('/edith')}
                 title="Switch to E.D.I.T.H. Developer IDE Workspace"
                 className="flex items-center gap-2 px-3.5 py-1.5 rounded-full glass-pill hover:border-purple-400 text-xs font-mono text-purple-200 hover:text-white transition-all shadow-lg hover:shadow-purple-500/25 group cursor-pointer"
@@ -302,7 +351,19 @@ export function FridayDashboard() {
                 <span className="font-semibold tracking-wide">E.D.I.T.H. // IDE</span>
                 <ExternalLink className="w-3 h-3 text-purple-400" />
               </button>
-              <button className="w-8 h-8 rounded-full glass-pill flex items-center justify-center text-slate-400 hover:text-white cursor-pointer">
+              <button
+                type="button"
+                aria-label="Conversation options"
+                title="Session status"
+                onClick={() =>
+                  setFeatureNotice(
+                    activeConversationId
+                      ? `Active conversation persisted (${messages.length} messages). Use the sidebar trash icon to delete it.`
+                      : 'Start typing below to create and persist a new conversation.'
+                  )
+                }
+                className="w-8 h-8 rounded-full glass-pill flex items-center justify-center text-slate-400 hover:text-white cursor-pointer"
+              >
                 <MoreHorizontal className="w-4 h-4" />
               </button>
             </div>
@@ -310,8 +371,8 @@ export function FridayDashboard() {
 
           {/* Central Content Area */}
           <div className="flex-1 overflow-y-auto px-6 py-6 flex flex-col justify-between min-h-0">
-            {/* If no user messages yet: Show the exact Reference Hero Banner! */}
-            {messages.length <= 1 ? (
+            {/* Show Hero Banner only before the first message or while starting a fresh chat */}
+            {messages.length === 0 && !isStreaming && !isLoadingMessages ? (
               <div className="flex-1 flex flex-col items-center justify-center my-auto max-w-2xl mx-auto w-full text-center">
                 {/* 3D Glowing Cosmic AI Orb */}
                 <div className="mb-4">
@@ -351,45 +412,110 @@ export function FridayDashboard() {
             ) : (
               /* Active Chat Message Stream */
               <div className="max-w-2xl mx-auto w-full space-y-4 my-auto">
-                {messages.map((msg) => (
-                  <div
-                    key={msg.id}
-                    className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
-                  >
-                    {msg.role === 'assistant' && (
-                      <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shrink-0 mt-1 shadow-md border border-white/20">
-                        <Sparkles className="w-3.5 h-3.5" />
+                {isLoadingMessages ? (
+                  <div className="flex items-center justify-center py-12">
+                    <div className="frosted-glass-card rounded-2xl px-4 py-3 flex items-center gap-2.5 text-xs text-purple-200">
+                      <Loader2 className="w-4 h-4 animate-spin text-purple-400" />
+                      <span>Loading conversation transcript...</span>
+                    </div>
+                  </div>
+                ) : (
+                  <>
+                    {messages.map((msg) => (
+                      <div
+                        key={msg.id}
+                        className={`flex gap-3 ${msg.role === 'user' ? 'justify-end' : 'justify-start'}`}
+                      >
+                        {msg.role === 'assistant' && (
+                          <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shrink-0 mt-1 shadow-md border border-white/20">
+                            <Sparkles className="w-3.5 h-3.5" />
+                          </div>
+                        )}
+                        <div
+                          className={`rounded-2xl px-4 py-3 text-xs md:text-sm leading-relaxed whitespace-pre-wrap ${
+                            msg.role === 'user'
+                              ? 'bg-gradient-to-r from-purple-600/40 to-indigo-600/40 border border-purple-400/40 text-white max-w-md shadow-lg backdrop-blur-xl'
+                              : 'frosted-glass-card text-slate-100 max-w-xl'
+                          }`}
+                        >
+                          <div>{msg.content}</div>
+                          {msg.role === 'assistant' && msg.isMock && (
+                            <div className="mt-2 pt-1.5 border-t border-white/10 text-[10px] font-mono text-amber-300/90">
+                              Simulated Provider Output
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    ))}
+
+                    {isStreaming && (
+                      <div className="flex gap-3 justify-start">
+                        <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shrink-0 animate-pulse border border-white/20">
+                          <Sparkles className="w-3.5 h-3.5" />
+                        </div>
+                        <div className="frosted-glass-card border-purple-400/50 rounded-2xl px-4 py-3 text-xs md:text-sm text-purple-200 max-w-xl whitespace-pre-wrap">
+                          <span>{streamBuffer || 'Synthesizing response...'}</span>
+                          <span className="inline-block w-1.5 h-3.5 ml-1 bg-purple-400 animate-pulse align-middle" />
+                        </div>
                       </div>
                     )}
-                    <div
-                      className={`rounded-2xl px-4 py-3 text-xs md:text-sm leading-relaxed ${
-                        msg.role === 'user'
-                          ? 'bg-gradient-to-r from-purple-600/40 to-indigo-600/40 border border-purple-400/40 text-white max-w-md shadow-lg backdrop-blur-xl'
-                          : 'frosted-glass-card text-slate-100 max-w-xl'
-                      }`}
-                    >
-                      {msg.content}
-                    </div>
-                  </div>
-                ))}
-
-                {isStreaming && (
-                  <div className="flex gap-3 justify-start">
-                    <div className="w-7 h-7 rounded-full bg-gradient-to-tr from-purple-600 to-pink-500 flex items-center justify-center text-white shrink-0 animate-pulse border border-white/20">
-                      <Sparkles className="w-3.5 h-3.5" />
-                    </div>
-                    <div className="frosted-glass-card border-purple-400/50 rounded-2xl px-4 py-3 text-xs md:text-sm text-purple-200 max-w-xl">
-                      <span>{streamBuffer || 'Synthesizing response...'}</span>
-                      <span className="inline-block w-1.5 h-3.5 ml-1 bg-purple-400 animate-pulse align-middle" />
-                    </div>
-                  </div>
+                  </>
                 )}
                 <div ref={messagesEndRef} />
               </div>
             )}
 
-            {/* Bottom Floating Frosted Glass Input Bar */}
-            <div className="max-w-2xl mx-auto w-full mt-4">
+            {/* Bottom Floating Frosted Glass Input Bar & Status Banners */}
+            <div className="max-w-2xl mx-auto w-full mt-4 space-y-2">
+              {error && (
+                <div
+                  role="alert"
+                  className="flex items-center justify-between gap-3 px-3.5 py-2.5 rounded-xl bg-red-500/15 border border-red-400/35 text-xs text-red-200 backdrop-blur-xl"
+                >
+                  <div className="flex items-center gap-2 min-w-0">
+                    <AlertCircle className="w-4 h-4 text-red-400 shrink-0" />
+                    <span className="truncate">{error}</span>
+                  </div>
+                  <div className="flex items-center gap-1.5 shrink-0">
+                    {lastFailedPrompt && !isStreaming && (
+                      <button
+                        type="button"
+                        onClick={() => retryLastMessage()}
+                        className="flex items-center gap-1 px-2.5 py-1 rounded-lg bg-red-500/25 hover:bg-red-500/40 text-white text-[11px] font-medium transition-colors cursor-pointer"
+                      >
+                        <RotateCcw className="w-3 h-3" />
+                        <span>Retry</span>
+                      </button>
+                    )}
+                    <button
+                      type="button"
+                      onClick={clearError}
+                      aria-label="Dismiss error"
+                      className="p-1 rounded-lg hover:bg-white/10 text-red-200 hover:text-white cursor-pointer"
+                    >
+                      <X className="w-3.5 h-3.5" />
+                    </button>
+                  </div>
+                </div>
+              )}
+
+              {featureNotice && (
+                <div
+                  role="status"
+                  className="flex items-center justify-between gap-3 px-3.5 py-2 rounded-xl glass-pill border border-purple-400/30 text-xs text-purple-100"
+                >
+                  <span className="truncate">{featureNotice}</span>
+                  <button
+                    type="button"
+                    onClick={() => setFeatureNotice(null)}
+                    aria-label="Dismiss notice"
+                    className="p-1 rounded-lg hover:bg-white/10 text-purple-200 hover:text-white shrink-0 cursor-pointer"
+                  >
+                    <X className="w-3.5 h-3.5" />
+                  </button>
+                </div>
+              )}
+
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -399,6 +525,12 @@ export function FridayDashboard() {
               >
                 <button
                   type="button"
+                  onClick={() =>
+                    setFeatureNotice(
+                      'File attachment upload is not enabled in F.R.I.D.A.Y. chat yet. Open E.D.I.T.H. // IDE to inspect workspace files.'
+                    )
+                  }
+                  aria-label="Attach File"
                   className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
                   title="Attach File"
                 >
@@ -409,25 +541,44 @@ export function FridayDashboard() {
                   type="text"
                   value={input}
                   onChange={(e) => setInput(e.target.value)}
+                  disabled={isLoadingMessages}
                   placeholder="Ask F.R.I.D.A.Y. anything..."
-                  className="flex-1 bg-transparent border-0 text-xs md:text-sm text-white placeholder-slate-400 focus:outline-none px-2"
+                  className="flex-1 bg-transparent border-0 text-xs md:text-sm text-white placeholder-slate-400 focus:outline-none px-2 disabled:opacity-50"
                 />
 
                 <button
                   type="button"
+                  onClick={() =>
+                    setFeatureNotice('Voice capture is not enabled in this browser build.')
+                  }
+                  aria-label="Voice Mode"
                   className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
                   title="Voice Mode"
                 >
                   <Mic className="w-4 h-4" />
                 </button>
 
-                <button
-                  type="submit"
-                  disabled={!input.trim() || isStreaming}
-                  className="p-2 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-purple-600/30 cursor-pointer border border-white/20"
-                >
-                  <ArrowUp className="w-4 h-4" />
-                </button>
+                {isStreaming ? (
+                  <button
+                    type="button"
+                    onClick={cancelStreaming}
+                    aria-label="Stop generating"
+                    title="Stop generating"
+                    className="p-2 rounded-xl bg-red-500/80 hover:bg-red-500 text-white transition-all shadow-md shadow-red-600/30 cursor-pointer border border-white/20"
+                  >
+                    <Square className="w-4 h-4 fill-current" />
+                  </button>
+                ) : (
+                  <button
+                    type="submit"
+                    disabled={!input.trim() || isLoadingMessages}
+                    aria-label="Send message"
+                    title="Send message"
+                    className="p-2 rounded-xl bg-gradient-to-tr from-purple-600 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 disabled:opacity-30 disabled:cursor-not-allowed text-white transition-all shadow-md shadow-purple-600/30 cursor-pointer border border-white/20"
+                  >
+                    <ArrowUp className="w-4 h-4" />
+                  </button>
+                )}
               </form>
             </div>
           </div>

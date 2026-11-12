@@ -12,11 +12,28 @@ export const ServiceEndpoints = {
 };
 
 export const AppRoutes = {
-  FRIDAY: '/friday',
-  EDITH: '/edith',
+  BOOT: '/',
   LOGIN: '/login',
-  REGISTER: '/register',
-  SETTINGS: '/settings'
+  FRIDAY: '/friday',
+  EDITH: '/edith'
+};
+
+export const UserRoles = {
+  USER: 'USER',
+  DEVELOPER: 'DEVELOPER',
+  ADMIN: 'ADMIN'
+};
+
+export const PolicyDecisions = {
+  SAFE: 'SAFE',
+  CONFIRMATION_REQUIRED: 'CONFIRMATION_REQUIRED',
+  DENIED: 'DENIED'
+};
+
+export const InternalAuthHeaders = {
+  SERVICE_TOKEN: 'X-Internal-Service-Token',
+  USER_ID: 'X-User-Id',
+  REQUEST_ID: 'X-Request-Id'
 };
 
 export const TaskStatus = {
@@ -36,4 +53,3 @@ export const RiskTier = {
   NETWORK_ACCESS: 'NETWORK_ACCESS',
   GIT_PUSH: 'GIT_PUSH'
 };
-

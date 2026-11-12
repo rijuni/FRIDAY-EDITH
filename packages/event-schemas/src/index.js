@@ -1,9 +1,10 @@
 /**
  * @friday-edith/event-schemas
- * Canonical streaming and real-time event definitions (SSE & WebSockets).
+ * Canonical streaming and real-time event definitions (SSE & Agent Workflow Steps).
  */
 
 export const SSEEventTypes = {
+  META: 'meta',
   CHUNK: 'chunk',
   THINKING: 'thinking',
   TOOL_CALL: 'tool_call',
@@ -14,6 +15,14 @@ export const SSEEventTypes = {
   DONE: 'done'
 };
 
+export const AgentStepPhases = {
+  THINKING: 'thinking',
+  TOOL_CALL: 'tool_call',
+  TOOL_RESULT: 'tool_result',
+  PATCH_PROPOSAL: 'patch_proposal',
+  COMPLETE: 'complete'
+};
+
 export const RunnerEventTypes = {
   STDOUT: 'stdout',
   STDERR: 'stderr',
@@ -21,4 +30,3 @@ export const RunnerEventTypes = {
   DIFF_READY: 'diff_ready',
   STATUS: 'status'
 };
-
