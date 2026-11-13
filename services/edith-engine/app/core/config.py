@@ -1,8 +1,8 @@
 import os
 from pathlib import Path
 from typing import List
-from pydantic_settings import BaseSettings
-from pydantic import Field
+from pydantic_settings import BaseSettings, SettingsConfigDict
+from pydantic import AliasChoices, Field
 
 _DEFAULT_INTERNAL_SECRET = "dev_internal_service_secret_change_in_prod"
 
@@ -19,7 +19,10 @@ def _default_workspace_dir() -> str:
 class Settings(BaseSettings):
     APP_NAME: str = "E.D.I.T.H. Autonomous Agent Engine"
     VERSION: str = "2.1.0"
-    ENVIRONMENT: str = "development"
+    ENVIRONMENT: str = Field(
+        default="development",
+        validation_alias=AliasChoices("ENVIRONMENT", "NODE_ENV")
+    )
     PORT: int = 8002
     HOST: str = "127.0.0.1"
     LOG_LEVEL: str = "INFO"
@@ -44,9 +47,10 @@ class Settings(BaseSettings):
     MAX_CONTENT_BYTES: int = 1_048_576
     MAX_PAYLOAD_BYTES: int = 2_097_152
 
-    class Config:
-        env_file = ".env"
-        extra = "ignore"
+    model_config = SettingsConfigDict(
+        env_file=Path(__file__).resolve().parents[4] / ".env",
+        extra="ignore"
+    )
 
     @property
     def is_production(self) -> bool:
@@ -72,6 +76,10 @@ class Settings(BaseSettings):
             ):
                 raise RuntimeError(
                     "INTERNAL_SERVICE_SECRET must be set to a strong secret in production."
+                )
+            if not self.REQUIRE_INTERNAL_AUTH:
+                raise RuntimeError(
+                    "REQUIRE_INTERNAL_AUTH cannot be disabled in production environment."
                 )
 
 

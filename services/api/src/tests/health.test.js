@@ -34,3 +34,25 @@ test('GET /v1/health and /v1/health/readiness verify API + database readiness', 
     });
   }
 });
+
+test('API rejects untrusted browser origins on state-changing requests', async () => {
+  const server = app.listen(0, '127.0.0.1');
+  const port = await new Promise((resolve) => {
+    if (server.listening) return resolve(server.address().port);
+    server.once('listening', () => resolve(server.address().port));
+  });
+
+  try {
+    const response = await fetch(`http://127.0.0.1:${port}/v1/auth/logout`, {
+      method: 'POST',
+      headers: { Origin: 'https://attacker.example' }
+    });
+    assert.equal(response.status, 403);
+    assert.equal((await response.json()).message, 'Request origin is not allowed');
+  } finally {
+    await new Promise((resolve) => {
+      server.close(() => resolve());
+      if (typeof server.closeAllConnections === 'function') server.closeAllConnections();
+    });
+  }
+});

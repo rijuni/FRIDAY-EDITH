@@ -30,7 +30,7 @@ export function EdithAgentPanel({
       phase: 'complete',
       title: 'E.D.I.T.H. Workflow Agent Ready',
       detail:
-        'Connected to E.D.I.T.H. Engine (AST Indexer, Strict Diff Engine & Zero-Trust Policy Gateway). Enter a development task below.',
+        'Workspace analysis and diff previews are available. Patch previews are clearly marked and require your review before applying.',
       status: 'completed'
     }
   ]);
@@ -201,7 +201,7 @@ export function EdithAgentPanel({
         {isBusy && (
           <div className="p-3 rounded-xl bg-cyan-500/10 border border-cyan-400/30 flex items-center gap-2 text-cyan-300">
             <RefreshCw className="w-3.5 h-3.5 animate-spin shrink-0" />
-            <span className="text-[11px]">Running real engine workflow steps...</span>
+            <span className="text-[11px]">Analyzing workspace and preparing previews...</span>
           </div>
         )}
 

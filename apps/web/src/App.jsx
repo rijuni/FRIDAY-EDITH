@@ -1,11 +1,24 @@
-import React, { useState, useEffect } from 'react';
+import React, { lazy, Suspense, useState, useEffect } from 'react';
 import { Routes, Route, Navigate, useLocation, useSearchParams } from 'react-router-dom';
 import { FridayBoot } from './components/boot/FridayBoot';
 import { EdithBoot } from './components/boot/EdithBoot';
-import { FridayDashboard } from './features/friday/pages/FridayDashboard';
-import { EdithWorkspace } from './features/edith/pages/EdithWorkspace';
 import { Login } from './features/auth/pages/Login';
 import { useAuthStore } from './stores/authStore';
+
+const FridayDashboard = lazy(() =>
+  import('./features/friday/pages/FridayDashboard').then((module) => ({ default: module.FridayDashboard }))
+);
+const EdithWorkspace = lazy(() =>
+  import('./features/edith/pages/EdithWorkspace').then((module) => ({ default: module.EdithWorkspace }))
+);
+
+function RouteLoadingScreen() {
+  return (
+    <div className="min-h-screen w-screen flex items-center justify-center bg-[#070a12] text-slate-300 font-mono text-xs">
+      Loading workspace…
+    </div>
+  );
+}
 
 function SessionBootstrapScreen() {
   return (
@@ -99,7 +112,9 @@ export default function App() {
             bootCompleted={fridayBootCompleted}
             setBootCompleted={setFridayBootCompleted}
           >
-            <FridayDashboard />
+            <Suspense fallback={<RouteLoadingScreen />}>
+              <FridayDashboard />
+            </Suspense>
           </ProtectedRoute>
         }
       />
@@ -113,7 +128,9 @@ export default function App() {
             bootCompleted={edithBootCompleted}
             setBootCompleted={setEdithBootCompleted}
           >
-            <EdithWorkspace />
+            <Suspense fallback={<RouteLoadingScreen />}>
+              <EdithWorkspace />
+            </Suspense>
           </ProtectedRoute>
         }
       />

@@ -2,7 +2,7 @@
   "name": "@friday-edith/runner-service",
   "version": "2.1.0",
   "type": "module",
-  "description": "E.D.I.T.H. Isolated Native Process Execution Host (Port 8003)",
+  "description": "E.D.I.T.H. Fail-Closed Runner Status Service (Port 8003)",
   "main": "server.js",
   "scripts": {
     "start": "node server.js",

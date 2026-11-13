@@ -347,7 +347,7 @@ export function FridayDashboard() {
                   <span>Nebula Pro System</span>
                 </div>
                 <p className="text-[10px] text-slate-400 leading-snug">
-                  Full reasoning core with isolated Hyper-V runner integration.
+                  AI provider responses are labeled when running in mock mode. External providers are not connected yet.
                 </p>
               </div>
             </div>

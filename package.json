@@ -20,6 +20,8 @@
     "test:runner": "npm run test --prefix runner-host/runner-service",
     "test": "npm run test:api && npm run test:web && npm run test:runner",
     "db:seed": "npm run prisma:seed --workspace=@friday-edith/api",
+    "db:deploy:sqlite": "npm run prisma:migrate:deploy:sqlite --workspace=@friday-edith/api",
+    "db:deploy:mysql": "npm run prisma:migrate:deploy:mysql --workspace=@friday-edith/api",
     "db:validate:mysql": "npm run db:validate:mysql --workspace=@friday-edith/api"
   },
   "keywords": [

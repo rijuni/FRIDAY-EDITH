@@ -92,7 +92,7 @@ export function EdithBoot({ onComplete }) {
             <Cpu className="w-3.5 h-3.5 text-cyan-400" />
             <span>Reasoning Engine</span>
           </div>
-          <p className="text-[10px] text-slate-400 font-mono">Claude 3.7 / GPT-4o DAG Planner</p>
+          <p className="text-[10px] text-slate-400 font-mono">Workflow planning and code previews</p>
         </div>
 
         <div className="p-3 rounded-2xl frosted-glass-card border border-emerald-400/30 text-left">
@@ -100,7 +100,7 @@ export function EdithBoot({ onComplete }) {
             <ShieldCheck className="w-3.5 h-3.5 text-emerald-400" />
             <span>Sandbox Boundary</span>
           </div>
-          <p className="text-[10px] text-slate-400 font-mono">Native Runner Port 8003</p>
+          <p className="text-[10px] text-amber-200 font-mono">Execution disabled until isolation is verified</p>
         </div>
 
         <div className="p-3 rounded-2xl frosted-glass-card border border-blue-400/30 text-left">

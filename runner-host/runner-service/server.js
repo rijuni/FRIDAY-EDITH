@@ -14,7 +14,12 @@ const PORT = Number(process.env.RUNNER_PORT || 8003);
 const HOST = process.env.RUNNER_HOST || '127.0.0.1';
 const INTERNAL_SERVICE_SECRET =
   process.env.INTERNAL_SERVICE_SECRET || DEFAULT_INTERNAL_SERVICE_SECRET;
-const REQUIRE_INTERNAL_AUTH = process.env.RUNNER_REQUIRE_INTERNAL_AUTH !== 'false';
+const REQUIRE_INTERNAL_AUTH = true;
+// This service currently starts child processes directly on its own host. The
+// Hyper-V provisioning script is a stub, so this is not a safe boundary for
+// arbitrary user code. Keep execution disabled until a real isolated backend
+// replaces this host process-spawning path.
+const EXECUTION_ISOLATION_AVAILABLE = false;
 
 const MAX_BODY_BYTES = Number(process.env.RUNNER_MAX_BODY_BYTES || 65_536);
 const MAX_COMMAND_LENGTH = 2_000;
@@ -189,7 +194,6 @@ export function buildSanitizedEnv(sourceEnv = process.env) {
       clean[key] = sourceEnv[key];
     }
   }
-  clean.EDITH_RUNNER_ENV = 'isolated';
   clean.NODE_ENV = 'development';
   return clean;
 }
@@ -358,10 +362,12 @@ const server = http.createServer(async (req, res) => {
   if (req.method === 'GET' && parsedUrl.pathname === '/v1/health') {
     sendJson(
       res,
-      200,
+      EXECUTION_ISOLATION_AVAILABLE ? 200 : 503,
       {
-        status: 'healthy',
-        isolation: 'Strict Non-Docker (Native OS Boundary)'
+        status: EXECUTION_ISOLATION_AVAILABLE ? 'healthy' : 'unavailable',
+        executionEnabled: EXECUTION_ISOLATION_AVAILABLE,
+        isolation: 'unavailable',
+        reason: 'No verified isolated execution backend is configured.'
       },
       requestId
     );
@@ -379,6 +385,20 @@ const server = http.createServer(async (req, res) => {
           status: 'fail',
           errorCode: 'UNAUTHORIZED_INTERNAL_CALLER',
           message: auth.message
+        },
+        requestId
+      );
+      return;
+    }
+
+    if (!EXECUTION_ISOLATION_AVAILABLE) {
+      sendJson(
+        res,
+        503,
+        {
+          status: 'unavailable',
+          errorCode: 'ISOLATED_EXECUTION_UNAVAILABLE',
+          error: 'Code execution is disabled because no verified isolated runner backend is configured.'
         },
         requestId
       );
@@ -555,7 +575,7 @@ const isMainModule =
 
 if (isMainModule && NODE_ENV !== 'test') {
   server.listen(PORT, HOST, () => {
-    console.log(`[runner-host] Isolated runner service active on http://${HOST}:${PORT}`);
+    console.log(`[runner-host] Runner status service listening on http://${HOST}:${PORT}; execution enabled: ${EXECUTION_ISOLATION_AVAILABLE}`);
   });
 }
 

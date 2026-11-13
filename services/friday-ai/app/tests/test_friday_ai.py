@@ -171,5 +171,5 @@ if __name__ == "__main__":
     test_context_window_compaction()
     test_rag_user_and_workspace_isolation()
     test_log_redaction()
-    print("🎉 All 7 F.R.I.D.A.Y. AI Python tests passed successfully!")
+    print("All 7 F.R.I.D.A.Y. AI Python tests passed successfully.")
 

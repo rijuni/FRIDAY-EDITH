@@ -1,12 +1,24 @@
 import { Router } from 'express';
 import { z } from 'zod';
+import crypto from 'crypto';
+import fs from 'fs/promises';
+import path from 'path';
 import { config } from '../../config/index.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { validate } from '../../middleware/validate.js';
 import { auditService } from '../../modules/audit/audit.service.js';
+import { prisma } from '../../repositories/prisma.js';
 import { logger } from '../../utils/logger.js';
 
 export const edithRouter = Router();
+const MAX_INTERNAL_RESPONSE_BYTES = 8 * 1024 * 1024;
+
+function commandAuditFields(command) {
+  return {
+    commandHash: crypto.createHash('sha256').update(command).digest('hex'),
+    commandLength: command.length
+  };
+}
 
 function getEdithEngineUrl() {
   return process.env.EDITH_ENGINE_URL || config.EDITH_ENGINE_SERVICE_URL;
@@ -33,7 +45,24 @@ async function fetchJsonFromInternalService({ baseUrl, endpointPath, req, body }
     body: JSON.stringify(body)
   });
 
-  const text = await response.text();
+  const contentLength = Number(response.headers.get('content-length'));
+  if (Number.isFinite(contentLength) && contentLength > MAX_INTERNAL_RESPONSE_BYTES) {
+    await response.body?.cancel();
+    throw new Error('Internal service response exceeded the size limit.');
+  }
+
+  const chunks = [];
+  let totalBytes = 0;
+  if (response.body) {
+    for await (const chunk of response.body) {
+      totalBytes += chunk.length;
+      if (totalBytes > MAX_INTERNAL_RESPONSE_BYTES) {
+        throw new Error('Internal service response exceeded the size limit.');
+      }
+      chunks.push(chunk);
+    }
+  }
+  const text = Buffer.concat(chunks).toString('utf8');
   let data = null;
   if (text) {
     try {
@@ -45,13 +74,13 @@ async function fetchJsonFromInternalService({ baseUrl, endpointPath, req, body }
   return { response, data };
 }
 
-async function forwardToService({ baseUrl, endpointPath, req, res, errorCode, unavailableMessage }) {
+async function forwardToService({ baseUrl, endpointPath, req, res, errorCode, unavailableMessage, body = req.body }) {
   try {
     const { response, data } = await fetchJsonFromInternalService({
       baseUrl,
       endpointPath,
       req,
-      body: req.body
+      body
     });
     return res.status(response.status).json(data ?? {});
   } catch (err) {
@@ -63,6 +92,54 @@ async function forwardToService({ baseUrl, endpointPath, req, res, errorCode, un
       statusCode,
       errorCode: isTimeout ? 'EDITH_SERVICE_TIMEOUT' : errorCode,
       message: unavailableMessage
+    });
+  }
+}
+
+async function getUserWorkspaceRoot(userId) {
+  await fs.mkdir(config.EDITH_WORKSPACES_DIR, { recursive: true });
+  const baseRoot = await fs.realpath(config.EDITH_WORKSPACES_DIR);
+  const workspaceKey = crypto.createHash('sha256').update(userId).digest('hex').slice(0, 32);
+  const candidate = path.join(baseRoot, workspaceKey);
+  await fs.mkdir(candidate, { recursive: true });
+  const workspaceRoot = await fs.realpath(candidate);
+  const relative = path.relative(baseRoot, workspaceRoot);
+  if (relative.startsWith('..') || path.isAbsolute(relative)) {
+    throw new Error('Resolved workspace path escapes the configured workspace directory.');
+  }
+
+  const project = await prisma.workspaceProject.findFirst({
+    where: { userId, name: 'Default workspace' },
+    select: { id: true, localPath: true }
+  });
+  if (!project) {
+    await prisma.workspaceProject.create({
+      data: { userId, name: 'Default workspace', localPath: workspaceRoot }
+    });
+  } else if (path.resolve(project.localPath) !== workspaceRoot) {
+    await prisma.workspaceProject.update({
+      where: { id: project.id },
+      data: { localPath: workspaceRoot }
+    });
+  }
+  return workspaceRoot;
+}
+
+async function forwardToUserWorkspace(options) {
+  const { req, res } = options;
+  try {
+    const workspaceRoot = await getUserWorkspaceRoot(req.user.id);
+    return await forwardToService({
+      ...options,
+      body: { ...req.body, workspace_root: workspaceRoot }
+    });
+  } catch (err) {
+    logger.error({ err: err?.message, requestId: req.id }, 'Unable to resolve the caller workspace');
+    return res.status(500).json({
+      status: 'error',
+      statusCode: 500,
+      errorCode: 'WORKSPACE_UNAVAILABLE',
+      message: 'Unable to access the authenticated user workspace.'
     });
   }
 }
@@ -139,7 +216,7 @@ const schemas = {
 
 // Autonomous Coding Agent Execution Loop
 edithRouter.post('/agent/run', authenticate, validate(schemas.agentRun), async (req, res) => {
-  return forwardToService({
+  return forwardToUserWorkspace({
     baseUrl: getEdithEngineUrl(),
     endpointPath: '/v1/agent/run',
     req,
@@ -151,7 +228,7 @@ edithRouter.post('/agent/run', authenticate, validate(schemas.agentRun), async (
 
 // Task Decomposition Plan
 edithRouter.post('/tasks/plan', authenticate, validate(schemas.taskPlan), async (req, res) => {
-  return forwardToService({
+  return forwardToUserWorkspace({
     baseUrl: getEdithEngineUrl(),
     endpointPath: '/v1/agent/plan',
     req,
@@ -199,7 +276,7 @@ edithRouter.post('/diff/apply', authenticate, validate(schemas.diffApply), async
 
 // Repository AST Scan
 edithRouter.post('/repository/scan', authenticate, validate(schemas.repositoryScan), async (req, res) => {
-  return forwardToService({
+  return forwardToUserWorkspace({
     baseUrl: getEdithEngineUrl(),
     endpointPath: '/v1/agent/repository/scan',
     req,
@@ -211,7 +288,7 @@ edithRouter.post('/repository/scan', authenticate, validate(schemas.repositorySc
 
 // Allowlisted Workspace File Read
 edithRouter.post('/files/read', authenticate, validate(schemas.fileRead), async (req, res) => {
-  return forwardToService({
+  return forwardToUserWorkspace({
     baseUrl: getEdithEngineUrl(),
     endpointPath: '/v1/agent/files/read',
     req,
@@ -260,7 +337,7 @@ edithRouter.post('/execute', authenticate, validate(schemas.execute), async (req
       resourceType: 'RUNNER_COMMAND',
       status: 'FAILURE',
       ip: req.ip,
-      details: { command, riskScore: policy.risk_score, reason: policy.reason }
+      details: { ...commandAuditFields(command), riskScore: policy.risk_score, reason: policy.reason }
     });
     return res.status(403).json({
       status: 'fail',
@@ -278,7 +355,7 @@ edithRouter.post('/execute', authenticate, validate(schemas.execute), async (req
       resourceType: 'RUNNER_COMMAND',
       status: 'FAILURE',
       ip: req.ip,
-      details: { command, riskScore: policy.risk_score }
+      details: { ...commandAuditFields(command), riskScore: policy.risk_score }
     });
     return res.status(409).json({
       status: 'fail',
@@ -289,16 +366,8 @@ edithRouter.post('/execute', authenticate, validate(schemas.execute), async (req
     });
   }
 
-  await auditService.logEvent({
-    action: 'EDITH_COMMAND_DISPATCHED',
-    userId: req.user.id,
-    resourceType: 'RUNNER_COMMAND',
-    status: 'SUCCESS',
-    ip: req.ip,
-    details: { command, decision: policy.decision, approved: Boolean(approved) }
-  });
-
-  // 2. Forward approved/safe command to isolated Native Runner Host
+  // 2. Forward approved/safe command to the runner and only mark success when
+  // the runner confirms it actually executed the command.
   try {
     const { response, data } = await fetchJsonFromInternalService({
       baseUrl: getRunnerHostUrl(),
@@ -306,11 +375,39 @@ edithRouter.post('/execute', authenticate, validate(schemas.execute), async (req
       req,
       body: { command, ...(cwd ? { cwd } : {}) }
     });
+
+    await auditService.logEvent({
+      action: response.ok ? 'EDITH_COMMAND_DISPATCHED' : 'EDITH_COMMAND_EXECUTION_FAILED',
+      userId: req.user.id,
+      resourceType: 'RUNNER_COMMAND',
+      status: response.ok ? 'SUCCESS' : 'FAILURE',
+      ip: req.ip,
+      details: {
+        ...commandAuditFields(command),
+        decision: policy.decision,
+        approved: Boolean(approved),
+        runnerStatus: response.status,
+        errorCode: response.ok ? undefined : data?.errorCode
+      }
+    });
     return res.status(response.status).json(data ?? {});
   } catch (err) {
     const isTimeout = err?.name === 'TimeoutError' || err?.name === 'AbortError';
     const statusCode = isTimeout ? 504 : 502;
     logger.error({ err: err?.message, requestId: req.id }, 'Runner host unreachable during execute');
+    await auditService.logEvent({
+      action: 'EDITH_COMMAND_EXECUTION_FAILED',
+      userId: req.user.id,
+      resourceType: 'RUNNER_COMMAND',
+      status: 'FAILURE',
+      ip: req.ip,
+      details: {
+        ...commandAuditFields(command),
+        decision: policy.decision,
+        approved: Boolean(approved),
+        errorCode: isTimeout ? 'RUNNER_TIMEOUT' : 'RUNNER_UNAVAILABLE'
+      }
+    });
     return res.status(statusCode).json({
       status: 'error',
       statusCode,

@@ -10,15 +10,14 @@ param (
 
 Write-Host "=== E.D.I.T.H. ISOLATED RUNNER OS USER SETUP ===" -ForegroundColor Cyan
 
-# Check if user already exists
+# This script intentionally does not create an account or grant ACLs: those
+# steps require a managed password and an explicit, reviewed permissions plan.
 $user = Get-LocalUser -Name $Username -ErrorAction SilentlyContinue
 if ($user) {
-    Write-Host "[*] Runner user '$Username' already exists." -ForegroundColor Yellow
+    Write-Host "User '$Username' exists, but this script has not verified its group membership, logon rights, token privileges, or workspace ACLs." -ForegroundColor Yellow
 } else {
-    Write-Host "[*] Script template for administrator creation of restricted user '$Username'." -ForegroundColor Cyan
-    Write-Host "    net user $Username <GeneratedPassword> /add /active:yes"
-    Write-Host "    icacls $WorkspaceDir /grant ${Username}:(OI)(CI)(M)"
+    Write-Host "User '$Username' was not created. Workspace target: $WorkspaceDir" -ForegroundColor Yellow
 }
 
-Write-Host "[+] Process execution boundary configured." -ForegroundColor Green
+throw 'A restricted OS execution boundary is not configured or verified. Arbitrary code execution must remain disabled.'
 

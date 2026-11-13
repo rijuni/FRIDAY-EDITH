@@ -51,10 +51,16 @@ function parseModels(schemaText) {
 export function validateMySqlCompatibility() {
   const sqliteSchemaPath = path.join(PRISMA_DIR, 'schema.prisma');
   const mysqlSchemaPath = path.join(PRISMA_DIR, 'schema.mysql.prisma');
+  const mysqlMigrationSchemaPath = path.join(PRISMA_DIR, 'mysql', 'schema.prisma');
 
   const sqliteText = fs.readFileSync(sqliteSchemaPath, 'utf8');
   const mysqlText = fs.readFileSync(mysqlSchemaPath, 'utf8');
+  const mysqlMigrationSchemaText = fs.readFileSync(mysqlMigrationSchemaPath, 'utf8');
   const errors = [];
+
+  if (mysqlText.replace(/\r\n/g, '\n').trim() !== mysqlMigrationSchemaText.replace(/\r\n/g, '\n').trim()) {
+    errors.push('prisma/mysql/schema.prisma must match canonical schema.mysql.prisma.');
+  }
 
   if (!/provider\s*=\s*"mysql"/.test(mysqlText)) {
     errors.push('schema.mysql.prisma must declare provider = "mysql".');

@@ -40,7 +40,8 @@ const envSchema = z.object({
   // Internal AI Microservice URLs
   FRIDAY_AI_SERVICE_URL: z.string().url().default('http://localhost:8001'),
   EDITH_ENGINE_SERVICE_URL: z.string().url().default('http://localhost:8002'),
-  EDITH_RUNNER_SERVICE_URL: z.string().url().default('http://localhost:8003')
+  EDITH_RUNNER_SERVICE_URL: z.string().url().default('http://localhost:8003'),
+  EDITH_WORKSPACES_DIR: z.string().default(path.resolve(__dirname, '../../../../runner-host/workspace/users'))
 });
 
 const parsed = envSchema.safeParse(process.env);

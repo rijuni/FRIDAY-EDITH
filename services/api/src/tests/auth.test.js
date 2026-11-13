@@ -84,6 +84,7 @@ test('Auth API: Signup forces USER role, cookie/CSRF session lifecycle, refresh 
     assert.equal(regRes.status, 201);
     const regData = await regRes.json();
     assert.equal(regData.data.user.role, 'USER');
+    assert.equal(regData.data.tokens, undefined, 'Tokens must stay in HttpOnly cookies');
     const userId = regData.data.user.id;
     createdUserIds.push(userId);
 
@@ -112,6 +113,7 @@ test('Auth API: Signup forces USER role, cookie/CSRF session lifecycle, refresh 
       })
     });
     assert.equal(loginRes.status, 200);
+    assert.equal((await loginRes.json()).data.tokens, undefined, 'Login tokens must stay in HttpOnly cookies');
     const cookies = extractCookieMap(loginRes);
     assert.ok(cookies[config.ACCESS_COOKIE_NAME], 'Access HttpOnly cookie should be set');
     assert.ok(cookies[config.REFRESH_COOKIE_NAME], 'Refresh HttpOnly cookie should be set');
@@ -145,6 +147,7 @@ test('Auth API: Signup forces USER role, cookie/CSRF session lifecycle, refresh 
       }
     });
     assert.equal(refreshRes.status, 200);
+    assert.equal((await refreshRes.json()).data.tokens, undefined, 'Rotated tokens must stay in HttpOnly cookies');
     const rotatedCookies = { ...cookies, ...extractCookieMap(refreshRes) };
     assert.notEqual(
       rotatedCookies[config.REFRESH_COOKIE_NAME],
@@ -184,20 +187,43 @@ test('Auth API: Signup forces USER role, cookie/CSRF session lifecycle, refresh 
       headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify({ email: adminEmail, password: 'AdminPassword2026!' })
     });
-    const adminData = await adminLoginRes.json();
-    const adminToken = adminData.data.tokens.accessToken;
+    const adminCookies = extractCookieMap(adminLoginRes);
 
     const promoteRes = await fetch(`${baseUrl}/users/${userId}/role`, {
       method: 'PATCH',
       headers: {
         'Content-Type': 'application/json',
-        Authorization: `Bearer ${adminToken}`
+        Cookie: buildCookieHeader(adminCookies),
+        'X-CSRF-Token': adminCookies[config.CSRF_COOKIE_NAME]
       },
       body: JSON.stringify({ role: 'DEVELOPER' })
     });
     assert.equal(promoteRes.status, 200);
     const promoteData = await promoteRes.json();
     assert.equal(promoteData.data.user.role, 'DEVELOPER');
+
+    // 11b. A role change takes effect immediately for already-issued access JWTs.
+    const demoteSelfRes = await fetch(`${baseUrl}/users/${adminUser.id}/role`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: buildCookieHeader(adminCookies),
+        'X-CSRF-Token': adminCookies[config.CSRF_COOKIE_NAME]
+      },
+      body: JSON.stringify({ role: 'USER' })
+    });
+    assert.equal(demoteSelfRes.status, 200);
+
+    const staleAdminRes = await fetch(`${baseUrl}/users/${userId}/role`, {
+      method: 'PATCH',
+      headers: {
+        'Content-Type': 'application/json',
+        Cookie: buildCookieHeader(adminCookies),
+        'X-CSRF-Token': adminCookies[config.CSRF_COOKIE_NAME]
+      },
+      body: JSON.stringify({ role: 'ADMIN' })
+    });
+    assert.equal(staleAdminRes.status, 403);
 
     // 12. Logout revokes session so refresh fails afterwards
     const logoutRes = await fetch(`${baseUrl}/logout`, {

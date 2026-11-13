@@ -1,6 +1,5 @@
 import { describe, it, before, after } from 'node:test';
 import assert from 'node:assert/strict';
-import path from 'path';
 import server, { buildSanitizedEnv } from '../server.js';
 
 const DEV_INTERNAL_SECRET =
@@ -38,12 +37,13 @@ describe('Runner Host Service Hardening Tests', () => {
     });
   });
 
-  it('GET /v1/health reports minimal healthy liveness without sensitive host paths', async () => {
+  it('GET /v1/health reports execution unavailable until an isolated backend exists', async () => {
     const res = await fetch(`${baseUrl}/v1/health`);
-    assert.equal(res.status, 200);
+    assert.equal(res.status, 503);
     const body = await res.json();
-    assert.equal(body.status, 'healthy');
-    assert.match(body.isolation, /Strict Non-Docker/i);
+    assert.equal(body.status, 'unavailable');
+    assert.equal(body.executionEnabled, false);
+    assert.equal(body.isolation, 'unavailable');
     assert.equal(body.port, undefined);
   });
 
@@ -70,28 +70,18 @@ describe('Runner Host Service Hardening Tests', () => {
     assert.equal(missingUser.status, 401);
   });
 
-  it('POST /v1/execute blocks outside cwd paths and hard-denied destructive commands', async () => {
-    const outsideCwd = path.parse(process.cwd()).root;
-    const cwdRes = await fetch(`${baseUrl}/v1/execute`, {
+  it('POST /v1/execute fails closed even for authenticated callers', async () => {
+    const res = await fetch(`${baseUrl}/v1/execute`, {
       method: 'POST',
       headers: authHeaders(),
-      body: JSON.stringify({ command: 'echo hi', cwd: outsideCwd })
+      body: JSON.stringify({ command: 'echo should-not-run' })
     });
-    assert.equal(cwdRes.status, 403);
-    const cwdBody = await cwdRes.json();
-    assert.equal(cwdBody.errorCode, 'CWD_ACCESS_DENIED');
-
-    const deniedRes = await fetch(`${baseUrl}/v1/execute`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ command: 'rmdir /s /q C:\\Windows' })
-    });
-    assert.equal(deniedRes.status, 403);
-    const deniedBody = await deniedRes.json();
-    assert.equal(deniedBody.errorCode, 'RUNNER_POLICY_DENIED');
+    assert.equal(res.status, 503);
+    const body = await res.json();
+    assert.equal(body.errorCode, 'ISOLATED_EXECUTION_UNAVAILABLE');
   });
 
-  it('POST /v1/execute runs authorized command cleanly without leaking parent API secrets', async () => {
+  it('runner environment construction omits parent API secrets', async () => {
     const sanitized = buildSanitizedEnv({
       PATH: 'C:\\Windows\\System32',
       JWT_SECRET: 'super_secret_jwt_key',
@@ -101,43 +91,7 @@ describe('Runner Host Service Hardening Tests', () => {
     assert.equal(sanitized.JWT_SECRET, undefined);
     assert.equal(sanitized.DATABASE_URL, undefined);
     assert.equal(sanitized.INTERNAL_SERVICE_SECRET, undefined);
-    assert.equal(sanitized.EDITH_RUNNER_ENV, 'isolated');
+    assert.equal(sanitized.EDITH_RUNNER_ENV, undefined);
 
-    const res = await fetch(`${baseUrl}/v1/execute`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ command: 'echo "EDITH_RUNNER_OK"' })
-    });
-
-    assert.equal(res.status, 200);
-    const body = await res.json();
-    assert.equal(body.exitCode, 0);
-    assert.match(body.stdout, /EDITH_RUNNER_OK/);
-    assert.equal(body.timedOut, false);
-    assert.equal(body.truncated, false);
-  });
-
-  it('POST /v1/execute rejects oversized payloads (413) and terminates timed-out process trees cleanly', async () => {
-    const hugeBody = JSON.stringify({ command: 'echo ok', extra: 'x'.repeat(70_000) });
-    const oversizedRes = await fetch(`${baseUrl}/v1/execute`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: hugeBody
-    });
-    assert.equal(oversizedRes.status, 413);
-
-    const sleepCmd =
-      process.platform === 'win32'
-        ? 'Start-Sleep -Milliseconds 3500'
-        : 'sleep 3.5';
-    const timeoutRes = await fetch(`${baseUrl}/v1/execute`, {
-      method: 'POST',
-      headers: authHeaders(),
-      body: JSON.stringify({ command: sleepCmd, timeoutMs: 500 })
-    });
-    assert.equal(timeoutRes.status, 200);
-    const timeoutBody = await timeoutRes.json();
-    assert.equal(timeoutBody.timedOut, true);
-    assert.equal(timeoutBody.exitCode, -1);
   });
 });

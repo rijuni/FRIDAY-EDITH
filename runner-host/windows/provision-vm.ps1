@@ -18,21 +18,16 @@ Write-Host "=== E.D.I.T.H. HYPER-V ISOLATION RUNNER PROVISIONER ===" -Foreground
 
 # Check Hyper-V feature presence
 $hyperV = Get-WindowsOptionalFeature -Online -FeatureName Microsoft-Hyper-V-All -ErrorAction SilentlyContinue
-if ($hyperV -and $hyperV.State -eq 'Enabled') {
-    Write-Host "[+] Hyper-V is enabled on host." -ForegroundColor Green
-    
-    $existingVm = Get-VM -Name $VmName -ErrorAction SilentlyContinue
-    if ($existingVm) {
-        Write-Host "[*] VM '$VmName' already exists. Status: $($existingVm.State)" -ForegroundColor Yellow
-    } else {
-        Write-Host "[*] Preparing to initialize VM '$VmName' (Memory: ${MemoryMb}MB, CPUs: $CpuCount)..." -ForegroundColor Cyan
-        # Provisioning command structure
-        # New-VM -Name $VmName -MemoryStartupBytes ($MemoryMb * 1MB) -SwitchName $SwitchName -NewVHDPath $VhdPath -NewVHDSizeBytes 20GB
-    }
-} else {
-    Write-Host "[!] Hyper-V is not enabled or running on Windows Home edition." -ForegroundColor Yellow
-    Write-Host "[+] Falling back to restricted OS User sandbox boundary (create-runner-user.ps1)." -ForegroundColor Cyan
+if (-not $hyperV -or $hyperV.State -ne 'Enabled') {
+    throw 'Hyper-V is unavailable. No restricted-user fallback is provisioned by this script.'
 }
 
-Write-Host "=== PROVISIONING VERIFIED ===" -ForegroundColor Green
+$existingVm = Get-VM -Name $VmName -ErrorAction SilentlyContinue
+if ($existingVm) {
+    Write-Host "VM '$VmName' exists with status '$($existingVm.State)', but this script does not verify its guest image, networking, limits, or runner service." -ForegroundColor Yellow
+} else {
+    Write-Host "A VM was not created. A bootable guest image and configured guest runner are required before provisioning can be implemented." -ForegroundColor Yellow
+}
+
+throw 'Runner isolation is not provisioned or verified. Arbitrary code execution must remain disabled.'
 

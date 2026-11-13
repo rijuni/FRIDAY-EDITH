@@ -19,7 +19,7 @@ export async function register(req, res, next) {
     setAuthCookies(res, result.tokens);
     res.status(201).json({
       status: 'success',
-      data: result
+      data: { user: result.user }
     });
   } catch (error) {
     next(error);
@@ -37,7 +37,7 @@ export async function login(req, res, next) {
     setAuthCookies(res, result.tokens);
     res.status(200).json({
       status: 'success',
-      data: result
+      data: { user: result.user }
     });
   } catch (error) {
     next(error);
@@ -67,7 +67,7 @@ export async function refresh(req, res, next) {
     setAuthCookies(res, result.tokens);
     res.status(200).json({
       status: 'success',
-      data: result
+      data: { user: result.user }
     });
   } catch (error) {
     clearAuthCookies(res);

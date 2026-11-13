@@ -1,6 +1,9 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import crypto from 'node:crypto';
+import fs from 'node:fs/promises';
 import http from 'node:http';
+import path from 'node:path';
 import { app } from '../app.js';
 import { config } from '../config/index.js';
 import { prisma } from '../repositories/prisma.js';
@@ -25,6 +28,7 @@ function closeServer(server) {
 test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcement, and zero fake fallbacks', async () => {
   const observedEngineCalls = [];
   const observedRunnerCalls = [];
+  let runnerUnavailable = false;
 
   const mockEngine = http.createServer((req, res) => {
     let raw = '';
@@ -86,6 +90,12 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
         return;
       }
 
+      if (req.url === '/v1/agent/repository/scan') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ workspace_root: body.workspace_root, total_files: 0, total_symbols: 0, files: [] }));
+        return;
+      }
+
       res.writeHead(404);
       res.end();
     });
@@ -99,6 +109,11 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
     req.on('end', () => {
       const body = raw ? JSON.parse(raw) : {};
       observedRunnerCalls.push({ url: req.url, headers: req.headers, body });
+      if (runnerUnavailable) {
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ errorCode: 'ISOLATED_EXECUTION_UNAVAILABLE' }));
+        return;
+      }
       res.writeHead(200, { 'Content-Type': 'application/json' });
       res.end(
         JSON.stringify({
@@ -118,6 +133,7 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
   const prevRunner = process.env.RUNNER_HOST_URL;
 
   const createdUserIds = [];
+  let ownerWorkspace = null;
 
   try {
     const enginePort = await startServer(mockEngine);
@@ -139,6 +155,10 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
       name: 'Edith Engineer'
     });
     createdUserIds.push(registered.user.id);
+    ownerWorkspace = path.join(
+      config.EDITH_WORKSPACES_DIR,
+      crypto.createHash('sha256').update(registered.user.id).digest('hex').slice(0, 32)
+    );
     const headers = {
       'Content-Type': 'application/json',
       Authorization: `Bearer ${registered.tokens.accessToken}`,
@@ -186,6 +206,26 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
     assert.equal(observedRunnerCalls[0].headers['x-internal-service-token'], config.INTERNAL_SERVICE_SECRET);
     assert.equal(observedRunnerCalls[0].headers['x-user-id'], registered.user.id);
 
+    // Workspace paths supplied by callers are replaced with a user-owned path.
+    const scanRes = await fetch(`${baseUrl}/repository/scan`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ workspace_root: 'M:\\Friday-Edith' })
+    });
+    assert.equal(scanRes.status, 200);
+    assert.equal(observedEngineCalls.at(-1).body.workspace_root, ownerWorkspace);
+
+    // 4b. Runner failure is passed through without a success response.
+    runnerUnavailable = true;
+    const unavailableExec = await fetch(`${baseUrl}/execute`, {
+      method: 'POST',
+      headers,
+      body: JSON.stringify({ command: 'npm test' })
+    });
+    assert.equal(unavailableExec.status, 503);
+    assert.equal((await unavailableExec.json()).errorCode, 'ISOLATED_EXECUTION_UNAVAILABLE');
+    runnerUnavailable = false;
+
     // 5. Internal headers forwarded to Python engine
     const applyRes = await fetch(`${baseUrl}/diff/apply`, {
       method: 'POST',
@@ -215,6 +255,7 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
     if (createdUserIds.length > 0) {
       await prisma.user.deleteMany({ where: { id: { in: createdUserIds } } });
     }
+    if (ownerWorkspace) await fs.rm(ownerWorkspace, { recursive: true, force: true });
     await Promise.all([
       closeServer(mockEngine),
       closeServer(mockRunner),

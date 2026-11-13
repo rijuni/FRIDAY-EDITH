@@ -24,10 +24,11 @@ export function NebulaOrb({ isStreaming = false, size = 120 }) {
       return;
     }
 
-    const prefersReducedMotion =
-      typeof window !== 'undefined' &&
-      typeof window.matchMedia === 'function' &&
-      window.matchMedia('(prefers-reduced-motion: reduce)').matches;
+    const motionQuery =
+      typeof window !== 'undefined' && typeof window.matchMedia === 'function'
+        ? window.matchMedia('(prefers-reduced-motion: reduce)')
+        : null;
+    let reducedMotion = Boolean(motionQuery?.matches);
 
     let animationFrameId = null;
     let time = 0;
@@ -128,24 +129,49 @@ export function NebulaOrb({ isStreaming = false, size = 120 }) {
     };
 
     const renderLoop = () => {
-      if (document.visibilityState === 'hidden') {
-        animationFrameId = requestAnimationFrame(renderLoop);
-        return;
-      }
+      animationFrameId = null;
+      if (reducedMotion || document.visibilityState === 'hidden') return;
       time += isStreaming ? 0.04 : 0.015;
       drawFrame();
       animationFrameId = requestAnimationFrame(renderLoop);
     };
 
+    const stopLoop = () => {
+      if (animationFrameId !== null) cancelAnimationFrame(animationFrameId);
+      animationFrameId = null;
+    };
+
+    const startLoop = () => {
+      if (!reducedMotion && document.visibilityState !== 'hidden' && animationFrameId === null) {
+        animationFrameId = requestAnimationFrame(renderLoop);
+      }
+    };
+
+    const handleVisibilityChange = () => {
+      if (document.visibilityState === 'hidden') {
+        stopLoop();
+      } else {
+        drawFrame();
+        startLoop();
+      }
+    };
+
+    const handleMotionChange = (event) => {
+      reducedMotion = event.matches;
+      stopLoop();
+      drawFrame();
+      startLoop();
+    };
+
     drawFrame();
-    if (!prefersReducedMotion) {
-      animationFrameId = requestAnimationFrame(renderLoop);
-    }
+    startLoop();
+    document.addEventListener('visibilitychange', handleVisibilityChange);
+    motionQuery?.addEventListener?.('change', handleMotionChange);
 
     return () => {
-      if (animationFrameId !== null) {
-        cancelAnimationFrame(animationFrameId);
-      }
+      stopLoop();
+      document.removeEventListener('visibilitychange', handleVisibilityChange);
+      motionQuery?.removeEventListener?.('change', handleMotionChange);
     };
   }, [isStreaming]);
 
