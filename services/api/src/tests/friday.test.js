@@ -14,6 +14,7 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
   // Ephemeral local mock upstream representing Python friday-ai service
   let observedUpstreamHeaders = null;
   let observedChatPayload = null;
+  let failRetryOnce = true;
   const mockAiServer = http.createServer((req, res) => {
     observedUpstreamHeaders = req.headers;
     const chunks = [];
@@ -26,6 +27,12 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
         return;
       }
 
+      if (req.url === '/v1/chat/models' && req.method === 'GET') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'success', data: { provider_mode: 'mock', models: [{ id: 'claude-3-7-sonnet', label: 'Mock · Claude-style' }] } }));
+        return;
+      }
+
       if (req.url === '/v1/documents/parse' && req.method === 'POST') {
         res.writeHead(200, { 'Content-Type': 'application/json' });
         res.end(
@@ -34,9 +41,9 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
             data: {
               filename: 'notes.md',
               mime_type: 'text/markdown',
-              total_chars: 28,
+              total_chars: 76,
               chunk_count: 1,
-              chunks: [{ chunk_index: 0, text: '# Test Notes\nAttach content.', char_count: 28 }]
+              chunks: [{ chunk_index: 0, text: '# Authentication\nSecure tokens and neural streaming architecture.', char_count: 66 }]
             }
           })
         );
@@ -49,10 +56,18 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
         observedChatPayload = null;
       }
 
+      if (req.url === '/v1/chat/stream' && failRetryOnce && observedChatPayload?.messages?.at(-1)?.content?.includes('Retry after temporary provider outage')) {
+        failRetryOnce = false;
+        res.writeHead(503, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify({ status: 'error', errorCode: 'PROVIDER_UNAVAILABLE', message: 'Provider unavailable' }));
+        return;
+      }
+
       res.writeHead(200, {
         'Content-Type': 'text/event-stream',
         'Cache-Control': 'no-cache'
       });
+      res.write('event: citations\ndata: {"event":"citations","metadata":{"citations":[{"id":"chunk-1","source":"Personal/notes.md","knowledgeBaseId":"kb-test","chunkIndex":0,"label":"S1"}]}}\n\n');
       res.write('event: thinking\ndata: {"event":"thinking","text":"Thinking...","metadata":{"is_mock":true}}\n\n');
       // Deliberately split JSON frame across two chunks to verify SSE buffering
       res.write('event: chunk\ndata: {"event":"chunk","te');
@@ -113,6 +128,38 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
     const listData = await listRes.json();
     assert.ok(listData.data.conversations.some((c) => c.id === convId));
     assert.equal(typeof listData.data.pagination.total, 'number');
+
+    const modelsRes = await fetch(`${baseUrl}/models`, { headers: { Authorization: `Bearer ${tokenA}` } });
+    assert.equal(modelsRes.status, 200);
+    assert.equal((await modelsRes.json()).data.provider_mode, 'mock');
+
+    const kbRes = await fetch(`${baseUrl}/knowledge-bases`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ name: 'Personal', description: 'Private test corpus' })
+    });
+    assert.equal(kbRes.status, 201);
+    const knowledgeBaseId = (await kbRes.json()).data.knowledgeBase.id;
+    const ingestRes = await fetch(`${baseUrl}/knowledge-bases/${knowledgeBaseId}/documents`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ filename: 'notes.md', mimeType: 'text/markdown', content: Buffer.from('# Authentication\nSecure tokens remain private.').toString('base64'), encoding: 'base64' })
+    });
+    assert.equal(ingestRes.status, 201);
+    assert.equal((await ingestRes.json()).data.document.chunkCount, 1);
+    const documentsRes = await fetch(`${baseUrl}/knowledge-bases/${knowledgeBaseId}/documents`, {
+      headers: { Authorization: `Bearer ${tokenA}` }
+    });
+    assert.equal((await documentsRes.json()).data.documents[0].filename, 'notes.md');
+    const crossUserKbRes = await fetch(`${baseUrl}/knowledge-bases/${knowledgeBaseId}/documents`, {
+      headers: { Authorization: `Bearer ${tokenB}` }
+    });
+    assert.equal(crossUserKbRes.status, 404);
+
+    const memoryRes = await fetch(`${baseUrl}/memory`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ category: 'user_preference', content: 'Prefers concise answers.' })
+    });
+    assert.equal(memoryRes.status, 201);
+    const memoryId = (await memoryRes.json()).data.memory.id;
 
     // 4. Ownership isolation: User B must receive 403 on GET, POST message, DELETE
     const otherGetRes = await fetch(`${baseUrl}/conversations/${convId}`, {
@@ -184,7 +231,8 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
       body: JSON.stringify({
         filename: 'notes.md',
         mimeType: 'text/markdown',
-        content: '# Test Notes\nAttach content.'
+        content: Buffer.from('# Test Notes\nAttach content.').toString('base64'),
+        encoding: 'base64'
       })
     });
     assert.equal(otherAttachRes.status, 403);
@@ -229,6 +277,9 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
     assert.equal(observedUpstreamHeaders['x-user-id'], userA.user.id);
     assert.equal(observedUpstreamHeaders['x-request-id'], 'node-to-py-corr-1');
     assert.match(observedChatPayload.messages.at(-1).content, /\[Attached File: notes\.md/);
+    assert.equal(observedChatPayload.knowledge_chunks.length, 1);
+    assert.equal(observedChatPayload.knowledge_chunks[0].knowledge_base_id, knowledgeBaseId);
+    assert.equal(observedChatPayload.memories[0].id, memoryId);
 
     // 6. Verify both user & assistant messages + attachments persisted + title auto-updated
     const getRes = await fetch(`${baseUrl}/conversations/${convId}`, {
@@ -244,6 +295,47 @@ test('F.R.I.D.A.Y. API: Conversation CRUD, ownership isolation, SSE proxy auth, 
     assert.equal(conv.messages[0].attachments[0].filename, 'notes.md');
     assert.equal(conv.messages[1].role, 'assistant');
     assert.equal(conv.messages[1].content, 'Hello from F.R.I.D.A.Y.');
+    assert.equal(JSON.parse(conv.messages[1].metadata).citations[0].label, 'S1');
+
+    const retryPrompt = 'Retry after temporary provider outage';
+    const failedSend = await fetch(`${baseUrl}/conversations/${convId}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ content: retryPrompt })
+    });
+    assert.equal(failedSend.status, 503);
+    const retrySend = await fetch(`${baseUrl}/conversations/${convId}/messages`, {
+      method: 'POST', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ content: retryPrompt })
+    });
+    assert.equal(retrySend.status, 200);
+    const retryTranscript = await retrySend.text();
+    assert.ok(retryTranscript.includes('Hello from '));
+    const retryConversation = await prisma.conversation.findUnique({
+      where: { id: convId }, include: { messages: { orderBy: { createdAt: 'asc' } } }
+    });
+    assert.equal(retryConversation.messages.length, 4, 'retry must reuse the saved user message instead of duplicating it');
+
+    const otherMemoryDelete = await fetch(`${baseUrl}/memory/${memoryId}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${tokenB}` }
+    });
+    assert.equal(otherMemoryDelete.status, 404);
+    const deleteMemoryRes = await fetch(`${baseUrl}/memory/${memoryId}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${tokenA}` }
+    });
+    assert.equal(deleteMemoryRes.status, 200);
+    const deleteDocumentRes = await fetch(`${baseUrl}/knowledge-bases/${knowledgeBaseId}/documents`, {
+      method: 'DELETE', headers: { 'Content-Type': 'application/json', Authorization: `Bearer ${tokenA}` },
+      body: JSON.stringify({ filename: 'notes.md' })
+    });
+    assert.equal(deleteDocumentRes.status, 200);
+    const documentsAfterDelete = await fetch(`${baseUrl}/knowledge-bases/${knowledgeBaseId}/documents`, {
+      headers: { Authorization: `Bearer ${tokenA}` }
+    });
+    assert.equal((await documentsAfterDelete.json()).data.documents.length, 0);
+    const deleteKbRes = await fetch(`${baseUrl}/knowledge-bases/${knowledgeBaseId}`, {
+      method: 'DELETE', headers: { Authorization: `Bearer ${tokenA}` }
+    });
+    assert.equal(deleteKbRes.status, 200);
 
     // 7. Owner can delete conversation cleanly
     const deleteRes = await fetch(`${baseUrl}/conversations/${convId}`, {

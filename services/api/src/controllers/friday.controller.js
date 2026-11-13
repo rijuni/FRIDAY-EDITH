@@ -43,21 +43,88 @@ function buildConversationTitle(content) {
   return cleaned.length > 52 ? `${cleaned.slice(0, 49)}...` : cleaned;
 }
 
-function extractSseChunkText(lines) {
-  let text = '';
+function extractSseData(lines) {
+  const result = { text: '', citations: null, metadata: {} };
   for (const line of lines) {
     const trimmed = line.replace(/\r$/, '');
     if (!trimmed.startsWith('data: ')) continue;
     try {
       const parsed = JSON.parse(trimmed.slice(6));
       if (parsed.event === 'chunk' && typeof parsed.text === 'string') {
-        text += parsed.text;
+        result.text += parsed.text;
+      } else if (parsed.event === 'citations' && Array.isArray(parsed.metadata?.citations)) {
+        result.citations = parsed.metadata.citations;
+      }
+      for (const key of ['is_mock', 'provider', 'total_tokens', 'prompt_tokens', 'completion_tokens']) {
+        if (parsed.metadata?.[key] !== undefined) result.metadata[key] = parsed.metadata[key];
       }
     } catch {
       // Ignore partial or non-JSON data lines
     }
   }
-  return text;
+  return result;
+}
+
+async function parseUploadedText({ req, filename, mimeType, content, encoding = 'utf8' }) {
+  let fileBytes;
+  if (encoding === 'base64') {
+    if (!/^(?:[A-Za-z0-9+/]{4})*(?:[A-Za-z0-9+/]{2}==|[A-Za-z0-9+/]{3}=)?$/.test(content)) {
+      const error = new Error('File content is not valid base64.');
+      error.statusCode = 400;
+      throw error;
+    }
+    fileBytes = Buffer.from(content, 'base64');
+    if (fileBytes.toString('base64') !== content) {
+      const error = new Error('File content is not canonical base64.');
+      error.statusCode = 400;
+      throw error;
+    }
+  } else if (encoding === 'utf8') {
+    fileBytes = Buffer.from(content, 'utf8');
+  } else {
+    const error = new Error('File content encoding is unsupported.');
+    error.statusCode = 400;
+    throw error;
+  }
+  if (fileBytes.length > 512 * 1024) {
+    const error = new Error('File exceeds the 512 KB limit.');
+    error.statusCode = 413;
+    throw error;
+  }
+  const formData = new FormData();
+  formData.append('file', new Blob([fileBytes], { type: mimeType }), filename);
+  const response = await fetch(`${getFridayAiUrl()}/v1/documents/parse`, {
+    method: 'POST',
+    signal: AbortSignal.timeout(config.AI_REQUEST_TIMEOUT_MS),
+    headers: {
+      'X-Internal-Service-Token': config.INTERNAL_SERVICE_SECRET,
+      'X-User-Id': req.user.id,
+      'X-Request-Id': req.id || ''
+    },
+    body: formData
+  });
+  const data = await response.json().catch(() => null);
+  if (!response.ok) {
+    const error = new Error(data?.message || 'Document validation failed');
+    error.statusCode = response.status >= 500 ? 502 : response.status;
+    error.errorCode = data?.errorCode || 'DOCUMENT_PARSE_FAILED';
+    throw error;
+  }
+  return data?.data || {};
+}
+
+async function fetchFridayModels(req) {
+  const response = await fetch(`${getFridayAiUrl()}/v1/chat/models`, {
+    headers: {
+      'X-Internal-Service-Token': config.INTERNAL_SERVICE_SECRET,
+      'X-User-Id': req.user.id,
+      'X-Request-Id': req.id || ''
+    },
+    signal: AbortSignal.timeout(config.AI_REQUEST_TIMEOUT_MS)
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok) throw new Error(payload?.message || 'Unable to load configured F.R.I.D.A.Y. models');
+  return payload?.data || { models: [] };
 }
 
 export async function createConversation(req, res, next) {
@@ -150,6 +217,15 @@ export async function getRuntimeStatus(req, res, next) {
   }
 }
 
+export async function listModels(req, res, next) {
+  try {
+    res.status(200).json({ status: 'success', data: await fetchFridayModels(req) });
+  } catch (error) {
+    logger.warn({ err: error?.message, requestId: req.id }, 'F.R.I.D.A.Y. model list is unavailable');
+    res.status(503).json({ status: 'error', statusCode: 503, errorCode: 'AI_SERVICE_UNAVAILABLE', message: 'F.R.I.D.A.Y. provider configuration is unavailable.' });
+  }
+}
+
 export async function submitSupportReport(req, res, next) {
   try {
     const { category, subject, description, includeDiagnostics } = req.body;
@@ -191,7 +267,7 @@ export async function submitSupportReport(req, res, next) {
 export async function uploadAttachment(req, res, next) {
   try {
     const conversationId = req.params.id;
-    const { filename, mimeType, content } = req.body;
+    const { filename, mimeType, content, encoding = 'utf8' } = req.body;
 
     const conversation = await prisma.conversation.findUnique({
       where: { id: conversationId },
@@ -208,22 +284,11 @@ export async function uploadAttachment(req, res, next) {
 
     assertOwnership(conversation.userId, req.user);
 
-    const formData = new FormData();
-    formData.append('file', new Blob([content], { type: mimeType }), filename);
-
-    let parseResponse;
+    let parsedData;
     try {
-      parseResponse = await fetch(`${getFridayAiUrl()}/v1/documents/parse`, {
-        method: 'POST',
-        signal: AbortSignal.timeout(config.AI_REQUEST_TIMEOUT_MS),
-        headers: {
-          'X-Internal-Service-Token': config.INTERNAL_SERVICE_SECRET,
-          'X-User-Id': req.user.id,
-          'X-Request-Id': req.id || ''
-        },
-        body: formData
-      });
-    } catch {
+      parsedData = await parseUploadedText({ req, filename, mimeType, content, encoding });
+    } catch (error) {
+      if (error.statusCode) throw error;
       return res.status(502).json({
         status: 'error',
         statusCode: 502,
@@ -232,18 +297,6 @@ export async function uploadAttachment(req, res, next) {
       });
     }
 
-    const parseJson = await parseResponse.json().catch(() => null);
-    if (!parseResponse.ok) {
-      const statusCode = parseResponse.status >= 400 && parseResponse.status < 500 ? parseResponse.status : 502;
-      return res.status(statusCode).json({
-        status: statusCode < 500 ? 'fail' : 'error',
-        statusCode,
-        errorCode: parseJson?.errorCode || 'DOCUMENT_PARSE_FAILED',
-        message: parseJson?.message || 'Document validation failed'
-      });
-    }
-
-    const parsedData = parseJson?.data || {};
     const parsedContent = Array.isArray(parsedData.chunks)
       ? parsedData.chunks.map((c) => c.text || '').join('')
       : content;
@@ -253,7 +306,7 @@ export async function uploadAttachment(req, res, next) {
         conversationId,
         filename: parsedData.filename || filename,
         mimeType: parsedData.mime_type || mimeType,
-        sizeBytes: Buffer.byteLength(content, 'utf8'),
+        sizeBytes: parsedData.total_bytes || (encoding === 'base64' ? Buffer.from(content, 'base64').length : Buffer.byteLength(content, 'utf8')),
         storagePath: 'parsed-text',
         parsedContent
       },
@@ -272,7 +325,7 @@ export async function uploadAttachment(req, res, next) {
       userId: req.user.id,
       resourceType: 'ATTACHMENT',
       resourceId: attachment.id,
-      details: { conversationId, filename: attachment.filename, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes },
+      details: { conversationId, filename: attachment.filename, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes, malwareScan: parsedData.malware_scan },
       ip: req.ip
     });
 
@@ -282,13 +335,159 @@ export async function uploadAttachment(req, res, next) {
         attachment: {
           ...attachment,
           chunkCount: parsedData.chunk_count ?? 1,
-          totalChars: parsedData.total_chars ?? parsedContent.length
+          totalChars: parsedData.total_chars ?? parsedContent.length,
+          malwareScan: parsedData.malware_scan
         }
       }
     });
   } catch (error) {
     next(error);
   }
+}
+
+export async function listKnowledgeBases(req, res, next) {
+  try {
+    const knowledgeBases = await prisma.knowledgeBase.findMany({
+      where: { userId: req.user.id },
+      orderBy: { createdAt: 'desc' },
+      include: { _count: { select: { chunks: true } } }
+    });
+    res.status(200).json({ status: 'success', data: { knowledgeBases } });
+  } catch (error) { next(error); }
+}
+
+export async function createKnowledgeBase(req, res, next) {
+  try {
+    const knowledgeBase = await prisma.knowledgeBase.create({
+      data: { userId: req.user.id, name: req.body.name, description: req.body.description || null }
+    });
+    res.status(201).json({ status: 'success', data: { knowledgeBase } });
+  } catch (error) { next(error); }
+}
+
+export async function deleteKnowledgeBase(req, res, next) {
+  try {
+    const result = await prisma.knowledgeBase.deleteMany({
+      where: { id: req.params.id, userId: req.user.id }
+    });
+    if (!result.count) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Knowledge base not found' });
+    res.status(200).json({ status: 'success', message: 'Knowledge base and its indexed chunks were deleted' });
+  } catch (error) { next(error); }
+}
+
+export async function listKnowledgeDocuments(req, res, next) {
+  try {
+    const knowledgeBase = await prisma.knowledgeBase.findFirst({
+      where: { id: req.params.id, userId: req.user.id },
+      select: { id: true }
+    });
+    if (!knowledgeBase) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Knowledge base not found' });
+    const chunks = await prisma.documentChunk.findMany({
+      where: { knowledgeBaseId: knowledgeBase.id },
+      select: { title: true, chunkIndex: true, tokenCount: true, createdAt: true },
+      orderBy: [{ title: 'asc' }, { chunkIndex: 'asc' }],
+      take: 5000
+    });
+    const byTitle = new Map();
+    for (const chunk of chunks) {
+      const doc = byTitle.get(chunk.title) || { filename: chunk.title, chunkCount: 0, createdAt: chunk.createdAt };
+      doc.chunkCount += 1;
+      if (chunk.createdAt > doc.createdAt) doc.createdAt = chunk.createdAt;
+      byTitle.set(chunk.title, doc);
+    }
+    res.status(200).json({ status: 'success', data: { documents: [...byTitle.values()] } });
+  } catch (error) { next(error); }
+}
+
+export async function ingestKnowledgeDocument(req, res, next) {
+  try {
+    const knowledgeBase = await prisma.knowledgeBase.findFirst({
+      where: { id: req.params.id, userId: req.user.id }, select: { id: true }
+    });
+    if (!knowledgeBase) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Knowledge base not found' });
+    const parsed = await parseUploadedText({ req, ...req.body });
+    const chunks = (parsed.chunks || []).filter((item) => typeof item.text === 'string' && item.text.trim());
+    await prisma.$transaction(async (tx) => {
+      await tx.documentChunk.deleteMany({ where: { knowledgeBaseId: knowledgeBase.id, title: parsed.filename } });
+      if (chunks.length) {
+        await tx.documentChunk.createMany({
+          data: chunks.map((chunk) => ({
+            knowledgeBaseId: knowledgeBase.id,
+            title: parsed.filename,
+            content: chunk.text,
+            tokenCount: Math.max(1, Math.ceil(chunk.text.length / 4)),
+            chunkIndex: chunk.chunk_index,
+            metadata: JSON.stringify({ mimeType: parsed.mime_type, totalChars: parsed.total_chars })
+          }))
+        });
+      }
+    });
+    const fileSizeBytes = parsed.total_bytes || (req.body.encoding === 'base64'
+      ? Buffer.from(req.body.content, 'base64').length
+      : Buffer.byteLength(req.body.content, 'utf8'));
+    await auditService.logEvent({
+      action: 'KNOWLEDGE_DOCUMENT_INGESTED', userId: req.user.id,
+      resourceType: 'KNOWLEDGE_BASE', resourceId: knowledgeBase.id,
+      details: { filename: parsed.filename, chunkCount: chunks.length, sizeBytes: fileSizeBytes, malwareScan: parsed.malware_scan },
+      ip: req.ip
+    });
+    res.status(201).json({
+      status: 'success',
+      data: { document: { filename: parsed.filename, mimeType: parsed.mime_type, sizeBytes: fileSizeBytes, chunkCount: chunks.length, malwareScan: parsed.malware_scan } }
+    });
+  } catch (error) { next(error); }
+}
+
+export async function deleteKnowledgeDocument(req, res, next) {
+  try {
+    const knowledgeBase = await prisma.knowledgeBase.findFirst({
+      where: { id: req.params.id, userId: req.user.id }, select: { id: true }
+    });
+    if (!knowledgeBase) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Knowledge base not found' });
+    const result = await prisma.documentChunk.deleteMany({
+      where: { knowledgeBaseId: knowledgeBase.id, title: req.params.filename }
+    });
+    if (!result.count) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Document not found' });
+    res.status(200).json({ status: 'success', message: 'Document and indexed chunks deleted' });
+  } catch (error) { next(error); }
+}
+
+export async function listMemories(req, res, next) {
+  try {
+    const memories = await prisma.memoryItem.findMany({
+      where: { userId: req.user.id }, orderBy: { updatedAt: 'desc' }, take: 100
+    });
+    res.status(200).json({ status: 'success', data: { memories } });
+  } catch (error) { next(error); }
+}
+
+export async function createMemory(req, res, next) {
+  try {
+    const memory = await prisma.memoryItem.create({
+      data: { userId: req.user.id, category: req.body.category, content: req.body.content }
+    });
+    res.status(201).json({ status: 'success', data: { memory } });
+  } catch (error) { next(error); }
+}
+
+export async function updateMemory(req, res, next) {
+  try {
+    const result = await prisma.memoryItem.updateMany({
+      where: { id: req.params.id, userId: req.user.id },
+      data: { ...(req.body.category ? { category: req.body.category } : {}), ...(req.body.content ? { content: req.body.content } : {}) }
+    });
+    if (!result.count) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Memory not found' });
+    const memory = await prisma.memoryItem.findFirst({ where: { id: req.params.id, userId: req.user.id } });
+    res.status(200).json({ status: 'success', data: { memory } });
+  } catch (error) { next(error); }
+}
+
+export async function deleteMemory(req, res, next) {
+  try {
+    const result = await prisma.memoryItem.deleteMany({ where: { id: req.params.id, userId: req.user.id } });
+    if (!result.count) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Memory not found' });
+    res.status(200).json({ status: 'success', message: 'Memory deleted' });
+  } catch (error) { next(error); }
 }
 
 export async function getConversation(req, res, next) {
@@ -361,7 +560,7 @@ export async function deleteConversation(req, res, next) {
 
 export async function sendMessage(req, res, next) {
   const abortController = new AbortController();
-  const timeoutHandle = setTimeout(() => abortController.abort('timeout'), config.AI_REQUEST_TIMEOUT_MS);
+  const timeoutHandle = setTimeout(() => abortController.abort('timeout'), config.AI_STREAM_TIMEOUT_MS);
   let clientDisconnected = false;
 
   const handleClientClose = () => {
@@ -382,7 +581,7 @@ export async function sendMessage(req, res, next) {
       where: { id: conversationId },
       include: {
         messages: {
-          orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+          orderBy: [{ createdAt: 'desc' }, { id: 'desc' }],
           take: 20,
           include: {
             attachments: {
@@ -402,6 +601,9 @@ export async function sendMessage(req, res, next) {
     }
 
     assertOwnership(conversation.userId, req.user);
+    const previousMessages = [...conversation.messages].reverse();
+    const lastPreviousMessage = previousMessages.at(-1);
+    const isPersistedRetry = lastPreviousMessage?.role === 'user' && lastPreviousMessage.content === content;
 
     let linkedAttachments = [];
     if (uniqueAttachmentIds.length > 0) {
@@ -426,37 +628,60 @@ export async function sendMessage(req, res, next) {
           message: 'One or more attachments are invalid or do not belong to this conversation'
         });
       }
+    } else if (isPersistedRetry && lastPreviousMessage.attachments.length > 0) {
+      linkedAttachments = lastPreviousMessage.attachments;
     }
+
+    // Retrieval data is loaded only through the authenticated owner's relations.
+    const searchTerms = [...new Set((content.toLocaleLowerCase().match(/[\p{L}\p{N}_'-]{2,}/gu) || []))].slice(0, 8);
+    const [knowledgeChunks, memories] = await prisma.$transaction([
+      searchTerms.length ? prisma.documentChunk.findMany({
+        where: {
+          knowledgeBase: { userId: req.user.id },
+          OR: searchTerms.map((term) => ({ content: { contains: term } }))
+        },
+        orderBy: { createdAt: 'desc' },
+        take: 50,
+        select: {
+          id: true, title: true, content: true, chunkIndex: true, knowledgeBaseId: true,
+          knowledgeBase: { select: { name: true } }
+        }
+      }) : Promise.resolve([]),
+      prisma.memoryItem.findMany({
+        where: { userId: req.user.id },
+        orderBy: { updatedAt: 'desc' },
+        take: 20,
+        select: { id: true, category: true, content: true }
+      })
+    ]);
 
     // 2. Persist user message, link attachments, and assign initial title if default
     const shouldRetitle =
-      conversation.messages.length === 0 &&
+      previousMessages.length === 0 &&
       (conversation.title === 'New F.R.I.D.A.Y. Session' || conversation.title === 'New Conversation');
 
-    await prisma.$transaction(async (tx) => {
-      const userMessage = await tx.message.create({
-        data: {
-          conversationId,
-          role: 'user',
-          content
-        }
-      });
-
-      if (linkedAttachments.length > 0) {
-        await tx.attachment.updateMany({
-          where: { id: { in: linkedAttachments.map((a) => a.id) }, conversationId },
-          data: { messageId: userMessage.id }
+    if (!isPersistedRetry) {
+      await prisma.$transaction(async (tx) => {
+        const userMessage = await tx.message.create({
+          data: { conversationId, role: 'user', content }
         });
-      }
 
-      await tx.conversation.update({
-        where: { id: conversationId },
-        data: {
-          ...(shouldRetitle ? { title: buildConversationTitle(content) } : {}),
-          updatedAt: new Date()
+        if (linkedAttachments.length > 0) {
+          await tx.attachment.updateMany({
+            where: { id: { in: linkedAttachments.map((a) => a.id) }, conversationId },
+            data: { messageId: userMessage.id }
+          });
         }
+
+        await tx.conversation.update({
+          where: { id: conversationId },
+          data: {
+            ...(shouldRetitle ? { title: buildConversationTitle(content) } : {}),
+            updatedAt: new Date()
+          }
+        });
       });
-    });
+    }
 
     // 3. Assemble payload for authenticated Python Friday AI service (preserving within MAX_PROMPT_CHARS)
     const formatWithAttachments = (baseText, atts) => {
@@ -469,19 +694,30 @@ export async function sendMessage(req, res, next) {
       return combined.length > 32000 ? `${combined.slice(0, 31980)}\n[truncated]` : combined;
     };
 
-    const formattedMessages = conversation.messages.map((m) => ({
+    const formattedMessages = previousMessages.map((m) => ({
       role: m.role,
       content: formatWithAttachments(m.content, m.attachments)
     }));
-    formattedMessages.push({
-      role: 'user',
-      content: formatWithAttachments(content, linkedAttachments)
-    });
+    if (!isPersistedRetry) {
+      formattedMessages.push({
+        role: 'user',
+        content: formatWithAttachments(content, linkedAttachments)
+      });
+    }
 
     const aiPayload = {
       model: model || conversation.modelPreference || 'claude-3-7-sonnet',
       messages: formattedMessages,
       system_prompt: systemPrompt || conversation.systemPrompt || 'You are F.R.I.D.A.Y.',
+      knowledge_chunks: knowledgeChunks.map((chunk) => ({
+        id: chunk.id,
+        source: `${chunk.knowledgeBase.name}/${chunk.title || 'document'}`,
+        title: chunk.title,
+        text: chunk.content,
+        chunk_index: chunk.chunkIndex,
+        knowledge_base_id: chunk.knowledgeBaseId
+      })),
+      memories,
       ...(typeof temperature === 'number' ? { temperature } : {})
     };
 
@@ -506,11 +742,16 @@ export async function sendMessage(req, res, next) {
       } catch {
         // Ignore non-JSON error body
       }
-      return res.status(502).json({
+      const statusCode = aiResponse.status === 400 ? 400 : aiResponse.status === 503 ? 503 : aiResponse.status === 504 ? 504 : 502;
+      const providerMessages = {
+        PROVIDER_NOT_CONFIGURED: 'The selected AI provider is not configured with a server-side API key.',
+        MODEL_NOT_AVAILABLE: 'The selected model is not available in the configured provider.'
+      };
+      return res.status(statusCode).json({
         status: 'error',
-        statusCode: 502,
+        statusCode,
         errorCode,
-        message: 'Failed to connect to F.R.I.D.A.Y. AI Intelligence Service'
+        message: providerMessages[errorCode] || 'Failed to connect to F.R.I.D.A.Y. AI Intelligence Service'
       });
     }
 
@@ -521,6 +762,7 @@ export async function sendMessage(req, res, next) {
     res.setHeader('X-Accel-Buffering', 'no');
 
     let fullAssistantResponse = '';
+    let assistantMetadata = {};
     let sseLineBuffer = '';
     const reader = aiResponse.body.getReader();
     const decoder = new TextDecoder();
@@ -537,11 +779,17 @@ export async function sendMessage(req, res, next) {
       sseLineBuffer += chunkText;
       const lines = sseLineBuffer.split('\n');
       sseLineBuffer = lines.pop() ?? '';
-      fullAssistantResponse += extractSseChunkText(lines);
+      const parsed = extractSseData(lines);
+      fullAssistantResponse += parsed.text;
+      if (parsed.citations) assistantMetadata.citations = parsed.citations;
+      Object.assign(assistantMetadata, parsed.metadata);
     }
 
     if (sseLineBuffer) {
-      fullAssistantResponse += extractSseChunkText([sseLineBuffer]);
+      const parsed = extractSseData([sseLineBuffer]);
+      fullAssistantResponse += parsed.text;
+      if (parsed.citations) assistantMetadata.citations = parsed.citations;
+      Object.assign(assistantMetadata, parsed.metadata);
     }
 
     // 6. Persist completed assistant message transactionally BEFORE closing SSE stream
@@ -552,7 +800,8 @@ export async function sendMessage(req, res, next) {
           data: {
             conversationId,
             role: 'assistant',
-            content: fullAssistantResponse.trim()
+            content: fullAssistantResponse.trim(),
+            metadata: Object.keys(assistantMetadata).length ? JSON.stringify(assistantMetadata) : null
           }
         }),
         prisma.conversation.update({

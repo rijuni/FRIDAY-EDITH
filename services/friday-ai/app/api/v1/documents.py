@@ -8,6 +8,7 @@ from app.core.errors import (
     UnsupportedDocumentFormatException
 )
 from app.ingestion.parser import document_parser
+from app.ingestion.malware import malware_scanner
 
 router = APIRouter()
 
@@ -35,6 +36,7 @@ async def parse_document(
             raise DocumentTooLargeException(settings.MAX_UPLOAD_SIZE_BYTES)
 
     try:
+        scan_result = await malware_scanner.scan(bytes(chunks_buf))
         parsed = await asyncio.wait_for(
             asyncio.to_thread(
                 document_parser.parse_content,
@@ -44,6 +46,7 @@ async def parse_document(
             ),
             timeout=settings.DOCUMENT_PARSE_TIMEOUT_SECONDS
         )
+        parsed["malware_scan"] = scan_result
     except asyncio.TimeoutError as exc:
         raise FridayAIException(
             message="Document parsing timed out.",

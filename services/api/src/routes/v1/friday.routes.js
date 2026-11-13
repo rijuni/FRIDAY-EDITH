@@ -56,7 +56,8 @@ const attachDocumentSchema = {
     .object({
       filename: z.string().trim().min(1).max(160),
       mimeType: z.string().trim().min(1).max(100),
-      content: z.string().min(1, 'File content cannot be empty').max(524288, 'File exceeds 512 KB limit')
+      content: z.string().min(1, 'File content cannot be empty').max(699052, 'File exceeds 512 KB limit'),
+      encoding: z.enum(['utf8', 'base64']).default('utf8')
     })
     .strict()
 };
@@ -72,7 +73,42 @@ const supportReportSchema = {
     .strict()
 };
 
+const createKnowledgeBaseSchema = {
+  body: z.object({
+    name: z.string().trim().min(1).max(120),
+    description: z.string().trim().max(1000).optional()
+  }).strict()
+};
+
+const knowledgeBaseIdSchema = { params: z.object({ id: z.string().min(1).max(64) }) };
+const ingestKnowledgeDocumentSchema = {
+  params: z.object({ id: z.string().min(1).max(64) }),
+  body: z.object({
+    filename: z.string().trim().min(1).max(160),
+    mimeType: z.string().trim().min(1).max(100),
+    content: z.string().min(1).max(699052, 'File exceeds 512 KB limit'),
+    encoding: z.enum(['utf8', 'base64']).default('utf8')
+  }).strict()
+};
+const deleteKnowledgeDocumentSchema = {
+  params: z.object({ id: z.string().min(1).max(64) }),
+  body: z.object({ filename: z.string().trim().min(1).max(160) }).strict()
+};
+const memoryIdSchema = { params: z.object({ id: z.string().min(1).max(64) }) };
+const memoryCategory = z.enum(['user_preference', 'project_context', 'coding_style', 'personal_fact']);
+const createMemorySchema = {
+  body: z.object({ category: memoryCategory, content: z.string().trim().min(1).max(2000) }).strict()
+};
+const updateMemorySchema = {
+  params: z.object({ id: z.string().min(1).max(64) }),
+  body: z.object({
+    category: memoryCategory.optional(),
+    content: z.string().trim().min(1).max(2000).optional()
+  }).strict().refine((value) => value.category !== undefined || value.content !== undefined)
+};
+
 fridayRouter.get('/status', fridayController.getRuntimeStatus);
+fridayRouter.get('/models', fridayController.listModels);
 fridayRouter.post('/support', chatLimiter, validate(supportReportSchema), fridayController.submitSupportReport);
 fridayRouter.post('/conversations', validate(createConvSchema), fridayController.createConversation);
 fridayRouter.get('/conversations', validate(listConvSchema), fridayController.listConversations);
@@ -84,6 +120,22 @@ fridayRouter.post(
   validate(attachDocumentSchema),
   fridayController.uploadAttachment
 );
+fridayRouter.get('/knowledge-bases', fridayController.listKnowledgeBases);
+fridayRouter.post('/knowledge-bases', validate(createKnowledgeBaseSchema), fridayController.createKnowledgeBase);
+fridayRouter.delete('/knowledge-bases/:id', validate(knowledgeBaseIdSchema), fridayController.deleteKnowledgeBase);
+fridayRouter.get('/knowledge-bases/:id/documents', validate(knowledgeBaseIdSchema), fridayController.listKnowledgeDocuments);
+fridayRouter.post(
+  '/knowledge-bases/:id/documents', chatLimiter,
+  validate(ingestKnowledgeDocumentSchema), fridayController.ingestKnowledgeDocument
+);
+fridayRouter.delete(
+  '/knowledge-bases/:id/documents', validate(deleteKnowledgeDocumentSchema),
+  fridayController.deleteKnowledgeDocument
+);
+fridayRouter.get('/memory', fridayController.listMemories);
+fridayRouter.post('/memory', validate(createMemorySchema), fridayController.createMemory);
+fridayRouter.patch('/memory/:id', validate(updateMemorySchema), fridayController.updateMemory);
+fridayRouter.delete('/memory/:id', validate(memoryIdSchema), fridayController.deleteMemory);
 fridayRouter.post(
   '/conversations/:id/messages',
   chatLimiter,

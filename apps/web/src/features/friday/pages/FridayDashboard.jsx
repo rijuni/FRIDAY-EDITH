@@ -40,8 +40,21 @@ const EXTENSION_MIME_MAP = {
   '.md': 'text/markdown',
   '.markdown': 'text/markdown',
   '.csv': 'text/csv',
-  '.json': 'application/json'
+  '.json': 'application/json',
+  '.pdf': 'application/pdf',
+  '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 };
+const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.csv', '.json']);
+
+function encodeBase64(bytes) {
+  let binary = '';
+  const blockSize = 0x8000;
+  for (let offset = 0; offset < bytes.length; offset += blockSize) {
+    binary += String.fromCharCode(...bytes.subarray(offset, offset + blockSize));
+  }
+  return btoa(binary);
+}
 
 function resolveAttachmentMime(filename, rawType) {
   const dotIdx = filename.lastIndexOf('.');
@@ -63,6 +76,8 @@ export function FridayDashboard() {
     activeConversationId,
     messages,
     selectedModel,
+    availableModels,
+    providerMode,
     setModel,
     pendingAttachments,
     addPendingAttachment,
@@ -93,6 +108,10 @@ export function FridayDashboard() {
     fetchConversations();
   }, [fetchConversations]);
 
+  useEffect(() => {
+    useFridayStore.getState().fetchModels();
+  }, []);
+
   const scrollToBottom = () => {
     messagesEndRef.current?.scrollIntoView({ behavior: 'smooth' });
   };
@@ -111,7 +130,7 @@ export function FridayDashboard() {
       const mimeType = resolveAttachmentMime(file.name, file.type);
       if (!mimeType) {
         setFeatureNotice(
-          `Unsupported file "${file.name}". Allowed formats: .txt, .md, .csv, .json.`
+          `Unsupported file "${file.name}". Allowed formats: text, PDF, DOCX, and XLSX.`
         );
         continue;
       }
@@ -126,20 +145,26 @@ export function FridayDashboard() {
       try {
         const buffer = await file.arrayBuffer();
         const bytes = new Uint8Array(buffer);
-        if (bytes.includes(0)) {
-          setFeatureNotice(`"${file.name}" appears to contain binary data and cannot be attached.`);
-          continue;
+        const dotIdx = file.name.lastIndexOf('.');
+        const extension = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
+        if (TEXT_EXTENSIONS.has(extension)) {
+          try {
+            new TextDecoder('utf-8', { fatal: true }).decode(bytes);
+          } catch {
+            setFeatureNotice(`"${file.name}" is not valid UTF-8 text.`);
+            continue;
+          }
         }
-        const content = new TextDecoder('utf-8', { fatal: true }).decode(bytes);
         addPendingAttachment({
           tempId: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
           filename: file.name,
           mimeType,
           sizeBytes: file.size,
-          content
+          content: encodeBase64(bytes),
+          encoding: 'base64'
         });
       } catch {
-        setFeatureNotice(`"${file.name}" is not valid UTF-8 text.`);
+        setFeatureNotice(`Unable to read "${file.name}".`);
       }
     }
   };
@@ -388,9 +413,11 @@ export function FridayDashboard() {
                     onChange={(e) => setModel(e.target.value)}
                     className="bg-transparent border-0 text-xs text-slate-200 focus:outline-none cursor-pointer pr-1"
                   >
-                    <option value="claude-3-7-sonnet" className="bg-[#120d24] text-white">F.R.I.D.A.Y. 4.0e (Claude 3.7)</option>
-                    <option value="gpt-4o" className="bg-[#120d24] text-white">GPT-4o Multimodal</option>
-                    <option value="gemini-2-flash" className="bg-[#120d24] text-white">Gemini 2.0 Flash</option>
+                    {availableModels.length ? availableModels.map((model) => (
+                      <option key={model.id} value={model.id} className="bg-[#120d24] text-white">{model.label}</option>
+                    )) : <option value={selectedModel} disabled className="bg-[#120d24] text-white">
+                      {providerMode === 'unavailable' ? 'AI service unavailable' : 'No provider configured'}
+                    </option>}
                   </select>
                   <ChevronDown className="w-3 h-3 text-slate-400" />
                 </div>
@@ -519,6 +546,18 @@ export function FridayDashboard() {
                             </div>
                           )}
                           <div>{msg.content}</div>
+                          {msg.role === 'assistant' && Array.isArray(msg.citations) && msg.citations.length > 0 && (
+                            <div className="mt-3 border-t border-white/10 pt-2 text-[10px] text-cyan-100/90" aria-label="Sources">
+                              <div className="mb-1 font-semibold uppercase tracking-wide text-cyan-200">Sources</div>
+                              <ul className="space-y-1">
+                                {msg.citations.map((citation) => (
+                                  <li key={`${citation.id}-${citation.label}`}>
+                                    [{citation.label}] {citation.source} · chunk {citation.chunkIndex + 1}
+                                  </li>
+                                ))}
+                              </ul>
+                            </div>
+                          )}
                           {msg.role === 'assistant' && msg.isMock && (
                             <div className="mt-2 pt-1.5 border-t border-white/10 text-[10px] font-mono text-amber-300/90">
                               Simulated Provider Output
@@ -632,7 +671,7 @@ export function FridayDashboard() {
                   ref={fileInputRef}
                   type="file"
                   multiple
-                  accept=".txt,.md,.markdown,.csv,.json,text/plain,text/markdown,text/csv,application/json"
+                  accept=".txt,.md,.markdown,.csv,.json,.pdf,.docx,.xlsx,text/plain,text/markdown,text/csv,application/json,application/pdf,application/vnd.openxmlformats-officedocument.wordprocessingml.document,application/vnd.openxmlformats-officedocument.spreadsheetml.sheet"
                   onChange={handleFileSelect}
                   className="hidden"
                 />
@@ -642,7 +681,7 @@ export function FridayDashboard() {
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Attach File"
                   className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
-                  title="Attach .txt, .md, .csv, or .json file (max 512 KB)"
+                  title="Attach text, PDF, DOCX, or XLSX files (max 512 KB)"
                 >
                   <Paperclip className="w-4 h-4" />
                 </button>

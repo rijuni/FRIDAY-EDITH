@@ -1,3 +1,5 @@
+import json
+import re
 from typing import List, Dict, Any, Optional
 
 
@@ -9,9 +11,9 @@ class HybridRetriever:
 
     @staticmethod
     def _wrap_untrusted_chunk(text: str, source: str) -> str:
-        """Wraps retrieved text in explicit data boundaries to prevent prompt injection."""
+        """Serialize retrieved text as data; this is context separation, not a model security boundary."""
         sanitized = text.replace("\x00", "").strip()
-        return f"<retrieved_document source=\"{source}\">\n{sanitized}\n</retrieved_document>"
+        return json.dumps({"source": source, "document_text": sanitized}, ensure_ascii=False)
 
     def retrieve(
         self,
@@ -25,7 +27,7 @@ class HybridRetriever:
             # Fail closed when user ownership scope is missing
             return []
 
-        query_terms = {term for term in query.lower().split() if term}
+        query_terms = {term for term in re.findall(r"[\w'-]{2,}", query.casefold()) if term}
         if not query_terms:
             return []
 
@@ -37,14 +39,15 @@ class HybridRetriever:
                 continue
 
             raw_text = chunk.get("text", "")
-            lower_text = raw_text.lower()
-            matches = sum(1 for term in query_terms if term in lower_text)
+            lower_text = raw_text.casefold()
+            matches = sum(1 for term in query_terms if re.search(rf"(?<!\w){re.escape(term)}(?!\w)", lower_text))
             if matches > 0:
                 source_title = str(chunk.get("source") or chunk.get("title") or "unknown")
                 scored_chunks.append({
                     "id": chunk.get("id"),
                     "source": source_title,
                     "chunk_index": chunk.get("chunk_index", 0),
+                    "knowledge_base_id": chunk.get("knowledge_base_id"),
                     "relevance_score": matches / len(query_terms),
                     "citation": {
                         "source": source_title,

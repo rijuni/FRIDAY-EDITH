@@ -26,6 +26,21 @@ class Settings(BaseSettings):
     ANTHROPIC_API_KEY: Optional[str] = None
     GEMINI_API_KEY: Optional[str] = None
 
+    # Provider selection stays explicit. `mock` is the safe local default;
+    # `auto` routes only recognized model IDs to a configured provider.
+    FRIDAY_AI_PROVIDER: str = "mock"
+    OPENAI_MODEL: str = "gpt-4o"
+    ANTHROPIC_MODEL: str = "claude-3-7-sonnet"
+    GEMINI_MODEL: str = "gemini-2.0-flash"
+    PROVIDER_REQUEST_TIMEOUT_SECONDS: float = 90.0
+
+    # Production document uploads require a local ClamAV daemon. Dev mode may
+    # explicitly leave scanning off; it is never allowed in production.
+    MALWARE_SCAN_MODE: str = "off"
+    CLAMD_HOST: str = "127.0.0.1"
+    CLAMD_PORT: int = 3310
+    MALWARE_SCAN_TIMEOUT_SECONDS: float = 15.0
+
     # Context, Payload & Ingestion limits
     MAX_CONTEXT_TOKENS: int = 128000
     MAX_PROMPT_CHARS: int = 32000
@@ -43,8 +58,15 @@ class Settings(BaseSettings):
 
 settings = Settings()
 
+if settings.FRIDAY_AI_PROVIDER not in {"mock", "auto", "openai", "anthropic", "gemini"}:
+    raise RuntimeError("FRIDAY_AI_PROVIDER must be mock, auto, openai, anthropic, or gemini")
+
 if settings.ENVIRONMENT == "production" and settings.INTERNAL_SERVICE_SECRET == DEFAULT_INTERNAL_SECRET:
     raise RuntimeError("INTERNAL_SERVICE_SECRET must be overridden in production environment")
 if settings.ENVIRONMENT == "production" and not settings.REQUIRE_INTERNAL_AUTH:
     raise RuntimeError("REQUIRE_INTERNAL_AUTH cannot be disabled in production environment")
+if settings.MALWARE_SCAN_MODE not in {"off", "clamd"}:
+    raise RuntimeError("MALWARE_SCAN_MODE must be off or clamd")
+if settings.ENVIRONMENT == "production" and settings.MALWARE_SCAN_MODE != "clamd":
+    raise RuntimeError("MALWARE_SCAN_MODE=clamd is required in production")
 

@@ -67,6 +67,27 @@ Set `DATABASE_URL` to a MySQL connection string before running `npm run db:deplo
 
 For Python microservices (`services/friday-ai` and `services/edith-engine`), activate each service's `.venv` and run Uvicorn on loopback (`127.0.0.1:8001` and `127.0.0.1:8002`).
 
+### Friday provider gateway
+
+F.R.I.D.A.Y. uses `FRIDAY_AI_PROVIDER=mock` by default so local development works without sending prompts outside your machine. Mock responses are labeled in the UI. Set `FRIDAY_AI_PROVIDER=auto` and provide one or more server-side `OPENAI_API_KEY`, `ANTHROPIC_API_KEY`, or `GEMINI_API_KEY` values to enable the matching provider; model IDs are configurable with `OPENAI_MODEL`, `ANTHROPIC_MODEL`, and `GEMINI_MODEL`. The model selector is populated from the models that the service can actually use. Missing credentials or unsupported models return an error instead of silently switching to mock output. Keep provider keys in the server `.env` or a secret manager; never put them in frontend variables.
+
+The gateway normalizes OpenAI Chat Completions, Anthropic Messages, and Gemini `streamGenerateContent` streams into Friday's SSE event format. `AI_STREAM_TIMEOUT_MS` bounds the API-to-provider stream. External-provider requests require valid API keys and a network connection; the automated checks use local fixtures and do not send prompts to provider services.
+
+### Friday documents, knowledge bases, and memory
+
+The authenticated API supports personal knowledge bases and user-managed memory:
+
+```text
+GET/POST    /v1/friday/knowledge-bases
+GET/POST    /v1/friday/knowledge-bases/:id/documents
+DELETE      /v1/friday/knowledge-bases/:id/documents   { "filename": "guide.md" }
+DELETE      /v1/friday/knowledge-bases/:id
+GET/POST    /v1/friday/memory
+PATCH/DELETE /v1/friday/memory/:id
+```
+
+Document ingestion accepts UTF-8 `.txt`, `.md`, `.csv`, and `.json`, plus `.pdf`, `.docx`, and `.xlsx`, up to 512 KiB at the application API. It checks extension/MIME agreement, text encoding or binary signatures, NUL bytes, JSON/CSV syntax, archive paths, ZIP expansion ratios, PDF page count, and extracted-text limits. PDF/DOCX/XLSX parsing uses pypdf/openpyxl and remains bounded by a parser timeout and size/page/archive limits; scanned-image OCR is not enabled. Production requires a local ClamAV daemon (`MALWARE_SCAN_MODE=clamd`); scanner outages and infected files fail closed. Local development defaults to `MALWARE_SCAN_MODE=off` and responses label this mode as `disabled-development`. Chunks are stored in Prisma and deleted with their knowledge base. Re-uploading a filename in the same knowledge base replaces its indexed chunks. Chat retrieves matching chunks only from the authenticated user's knowledge bases, sends at most five citations to the model, and stores citations in assistant-message metadata. Retrieval is bounded lexical matching for this development foundation; embeddings and semantic reranking remain later work. Memory is user-entered and editable/deletable; Friday does not silently extract personal facts from chat.
+
 ## Verification
 
 ```powershell

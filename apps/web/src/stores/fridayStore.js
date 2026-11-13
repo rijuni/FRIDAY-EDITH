@@ -9,6 +9,8 @@ const INITIAL_STATE = {
   activeConversationId: null,
   messages: [],
   selectedModel: 'claude-3-7-sonnet',
+  availableModels: [],
+  providerMode: 'unknown',
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   temperature: 0.7,
   pendingAttachments: [],
@@ -112,6 +114,27 @@ export const useFridayStore = create((set, get) => ({
     }
   },
 
+  fetchModels: async () => {
+    try {
+      const res = await apiFetch('/v1/friday/models', { method: 'GET' });
+      const payload = await safeParseJson(res);
+      if (!res.ok || !Array.isArray(payload?.data?.models)) {
+        set({ availableModels: [], providerMode: 'unavailable' });
+        return;
+      }
+      const models = payload.data.models;
+      set((state) => ({
+        availableModels: models,
+        providerMode: payload.data.provider_mode || 'unknown',
+        ...(models.length && !models.some((model) => model.id === state.selectedModel)
+          ? { selectedModel: models[0].id }
+          : {})
+      }));
+    } catch {
+      set({ availableModels: [], providerMode: 'unavailable' });
+    }
+  },
+
   selectConversation: async (id) => {
     if (!id) return;
     get().activeAbortController?.abort();
@@ -145,9 +168,20 @@ export const useFridayStore = create((set, get) => ({
       }
 
       const conv = payload.data.conversation;
+      const loadedMessages = (conv.messages || []).map((message) => {
+        let metadata = message.metadata;
+        if (typeof metadata === 'string') {
+          try { metadata = JSON.parse(metadata); } catch { metadata = {}; }
+        }
+        return {
+          ...message,
+          citations: Array.isArray(metadata?.citations) ? metadata.citations : [],
+          isMock: metadata?.is_mock === true
+        };
+      });
       set({
         activeConversationId: conv.id,
-        messages: conv.messages || [],
+        messages: loadedMessages,
         selectedModel: conv.modelPreference || get().selectedModel,
         isLoadingMessages: false
       });
@@ -244,7 +278,8 @@ export const useFridayStore = create((set, get) => ({
             body: JSON.stringify({
               filename: att.filename,
               mimeType: att.mimeType,
-              content: att.content
+              content: att.content,
+              encoding: att.encoding || 'utf8'
             }),
             signal: abortController.signal
           }
@@ -258,18 +293,22 @@ export const useFridayStore = create((set, get) => ({
 
       // 3. Append optimistic user message (with uploaded attachment chips)
       const userMsgId = `msg_user_${Date.now()}`;
-      set((state) => ({
-        pendingAttachments: [],
-        messages: [
-          ...state.messages,
-          {
-            id: userMsgId,
-            role: 'user',
-            content: promptText,
-            attachments: uploadedAttachments
-          }
-        ]
-      }));
+      set((state) => {
+        const lastMessage = state.messages.at(-1);
+        const isVisibleRetry = lastMessage?.role === 'user' && lastMessage.content === promptText;
+        return {
+          pendingAttachments: [],
+          messages: isVisibleRetry ? state.messages : [
+            ...state.messages,
+            {
+              id: userMsgId,
+              role: 'user',
+              content: promptText,
+              attachments: uploadedAttachments
+            }
+          ]
+        };
+      });
 
       // 4. Stream assistant response through Node API persistence proxy
       const streamRes = await apiFetch(
@@ -298,6 +337,7 @@ export const useFridayStore = create((set, get) => ({
       const decoder = new TextDecoder();
       let sseBuffer = '';
       let streamError = null;
+      let responseCitations = [];
 
       const processLines = (lines) => {
         for (const rawLine of lines) {
@@ -307,6 +347,9 @@ export const useFridayStore = create((set, get) => ({
             const frame = JSON.parse(line.slice(6));
             if (frame?.metadata?.is_mock) {
               set({ isMockResponse: true });
+            }
+            if (frame.event === 'citations' && Array.isArray(frame.metadata?.citations)) {
+              responseCitations = frame.metadata.citations;
             }
             if (frame.event === 'chunk' && typeof frame.text === 'string') {
               set((state) => ({ streamBuffer: state.streamBuffer + frame.text }));
@@ -345,7 +388,8 @@ export const useFridayStore = create((set, get) => ({
                 id: `msg_ast_${Date.now()}`,
                 role: 'assistant',
                 content: finalContent,
-                isMock: state.isMockResponse
+                isMock: state.isMockResponse,
+                citations: responseCitations
               }
             ]
           : state.messages,

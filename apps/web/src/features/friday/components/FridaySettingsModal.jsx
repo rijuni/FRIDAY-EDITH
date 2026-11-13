@@ -8,7 +8,7 @@ const DEFAULT_SYSTEM_PROMPT = 'You are F.R.I.D.A.Y., a high-intelligence AI assi
 
 export function FridaySettingsModal({ isOpen, onClose }) {
   const { user, setUser } = useAuthStore();
-  const { selectedModel, systemPrompt, temperature, setPreferences } = useFridayStore();
+  const { selectedModel, availableModels, providerMode, systemPrompt, temperature, setPreferences } = useFridayStore();
 
   const [displayName, setDisplayName] = useState(user?.name || '');
   const [modelChoice, setModelChoice] = useState(selectedModel || 'claude-3-7-sonnet');
@@ -204,9 +204,11 @@ export function FridaySettingsModal({ isOpen, onClose }) {
                   onChange={(e) => setModelChoice(e.target.value)}
                   className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/15 text-slate-100 focus:outline-none focus:border-purple-400 cursor-pointer"
                 >
-                  <option value="claude-3-7-sonnet" className="bg-[#120d24]">F.R.I.D.A.Y. 4.0e (Claude 3.7)</option>
-                  <option value="gpt-4o" className="bg-[#120d24]">GPT-4o Multimodal</option>
-                  <option value="gemini-2-flash" className="bg-[#120d24]">Gemini 2.0 Flash</option>
+                  {availableModels.length ? availableModels.map((model) => (
+                    <option key={model.id} value={model.id} className="bg-[#120d24]">{model.label}</option>
+                  )) : <option value={modelChoice} disabled className="bg-[#120d24]">
+                    {providerMode === 'unavailable' ? 'AI service unavailable' : 'No provider configured'}
+                  </option>}
                 </select>
               </div>
 

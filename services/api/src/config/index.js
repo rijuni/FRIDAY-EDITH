@@ -36,6 +36,7 @@ const envSchema = z.object({
   // Service-to-service Internal Auth & Timeouts
   INTERNAL_SERVICE_SECRET: z.string().min(16).default(DEFAULT_INTERNAL_SERVICE_SECRET),
   AI_REQUEST_TIMEOUT_MS: z.coerce.number().int().min(1000).max(120000).default(30000),
+  AI_STREAM_TIMEOUT_MS: z.coerce.number().int().min(5000).max(600000).default(120000),
 
   // Internal AI Microservice URLs
   FRIDAY_AI_SERVICE_URL: z.string().url().default('http://localhost:8001'),

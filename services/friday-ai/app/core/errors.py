@@ -30,6 +30,15 @@ class ProviderUnavailableException(FridayAIException):
         )
 
 
+class ProviderConfigurationException(FridayAIException):
+    def __init__(self, provider: str):
+        super().__init__(
+            message=f"The configured '{provider}' provider is unavailable. Check its server-side API key and model configuration.",
+            status_code=503,
+            error_code="PROVIDER_NOT_CONFIGURED"
+        )
+
+
 class ProviderTimeoutException(FridayAIException):
     def __init__(self, provider: str):
         super().__init__(
@@ -64,6 +73,16 @@ class DocumentTooLargeException(FridayAIException):
             status_code=413,
             error_code="DOCUMENT_TOO_LARGE"
         )
+
+
+class MalwareDetectedException(FridayAIException):
+    def __init__(self):
+        super().__init__("The uploaded document was rejected by malware scanning.", 422, "MALWARE_DETECTED")
+
+
+class MalwareScannerUnavailableException(FridayAIException):
+    def __init__(self):
+        super().__init__("Document scanning is unavailable; the upload was rejected.", 503, "MALWARE_SCANNER_UNAVAILABLE")
 
 
 async def friday_exception_handler(request: Request, exc: FridayAIException):
