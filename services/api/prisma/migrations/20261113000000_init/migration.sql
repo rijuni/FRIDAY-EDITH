@@ -1,248 +1,260 @@
 -- CreateTable
-CREATE TABLE "User" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "email" TEXT NOT NULL,
-    "name" TEXT,
-    "passwordHash" TEXT NOT NULL,
-    "role" TEXT NOT NULL DEFAULT 'USER',
-    "isActive" BOOLEAN NOT NULL DEFAULT true,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL
-);
+CREATE TABLE `User` (
+    `id` VARCHAR(191) NOT NULL,
+    `email` VARCHAR(191) NOT NULL,
+    `name` VARCHAR(191) NULL,
+    `passwordHash` TEXT NOT NULL,
+    `role` VARCHAR(191) NOT NULL DEFAULT 'USER',
+    `isActive` BOOLEAN NOT NULL DEFAULT true,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    UNIQUE INDEX `User_email_key`(`email`),
+    INDEX `User_email_idx`(`email`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "Session" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "tokenHash" TEXT NOT NULL,
-    "userAgent" TEXT,
-    "ipAddress" TEXT,
-    "expiresAt" DATETIME NOT NULL,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "Session_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `Session` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `tokenHash` VARCHAR(191) NOT NULL,
+    `userAgent` TEXT NULL,
+    `ipAddress` VARCHAR(191) NULL,
+    `expiresAt` DATETIME(3) NOT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    UNIQUE INDEX `Session_tokenHash_key`(`tokenHash`),
+    INDEX `Session_userId_idx`(`userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "AuditLog" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "action" TEXT NOT NULL,
-    "userId" TEXT,
-    "resourceType" TEXT NOT NULL,
-    "resourceId" TEXT,
-    "status" TEXT NOT NULL DEFAULT 'SUCCESS',
-    "details" TEXT,
-    "ip" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "AuditLog_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE SET NULL ON UPDATE CASCADE
-);
+CREATE TABLE `AuditLog` (
+    `id` VARCHAR(191) NOT NULL,
+    `action` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NULL,
+    `resourceType` VARCHAR(191) NOT NULL,
+    `resourceId` VARCHAR(191) NULL,
+    `status` VARCHAR(191) NOT NULL DEFAULT 'SUCCESS',
+    `details` LONGTEXT NULL,
+    `ip` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `AuditLog_action_idx`(`action`),
+    INDEX `AuditLog_userId_idx`(`userId`),
+    INDEX `AuditLog_createdAt_idx`(`createdAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "ProviderKey" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "provider" TEXT NOT NULL,
-    "encryptedKey" TEXT NOT NULL,
-    "isDefault" BOOLEAN NOT NULL DEFAULT false,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "ProviderKey_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `ProviderKey` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `provider` VARCHAR(191) NOT NULL,
+    `encryptedKey` TEXT NOT NULL,
+    `isDefault` BOOLEAN NOT NULL DEFAULT false,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    UNIQUE INDEX `ProviderKey_userId_provider_key`(`userId`, `provider`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "Conversation" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "title" TEXT NOT NULL DEFAULT 'New Conversation',
-    "userId" TEXT NOT NULL,
-    "projectId" TEXT,
-    "isPinned" BOOLEAN NOT NULL DEFAULT false,
-    "isArchived" BOOLEAN NOT NULL DEFAULT false,
-    "modelPreference" TEXT,
-    "systemPrompt" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "Conversation_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `Conversation` (
+    `id` VARCHAR(191) NOT NULL,
+    `title` VARCHAR(191) NOT NULL DEFAULT 'New Conversation',
+    `userId` VARCHAR(191) NOT NULL,
+    `projectId` VARCHAR(191) NULL,
+    `isPinned` BOOLEAN NOT NULL DEFAULT false,
+    `isArchived` BOOLEAN NOT NULL DEFAULT false,
+    `modelPreference` VARCHAR(191) NULL,
+    `systemPrompt` LONGTEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `Conversation_userId_idx`(`userId`),
+    INDEX `Conversation_updatedAt_idx`(`updatedAt`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "Message" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "conversationId" TEXT NOT NULL,
-    "role" TEXT NOT NULL,
-    "content" TEXT NOT NULL,
-    "reasoningContent" TEXT,
-    "metadata" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "Message_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `Message` (
+    `id` VARCHAR(191) NOT NULL,
+    `conversationId` VARCHAR(191) NOT NULL,
+    `role` VARCHAR(191) NOT NULL,
+    `content` LONGTEXT NOT NULL,
+    `reasoningContent` LONGTEXT NULL,
+    `metadata` LONGTEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `Message_conversationId_idx`(`conversationId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "Attachment" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "conversationId" TEXT NOT NULL,
-    "messageId" TEXT,
-    "filename" TEXT NOT NULL,
-    "mimeType" TEXT NOT NULL,
-    "sizeBytes" INTEGER NOT NULL,
-    "storagePath" TEXT NOT NULL,
-    "parsedContent" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "Attachment_conversationId_fkey" FOREIGN KEY ("conversationId") REFERENCES "Conversation" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "Attachment_messageId_fkey" FOREIGN KEY ("messageId") REFERENCES "Message" ("id") ON DELETE SET NULL ON UPDATE CASCADE
-);
+CREATE TABLE `Attachment` (
+    `id` VARCHAR(191) NOT NULL,
+    `conversationId` VARCHAR(191) NOT NULL,
+    `messageId` VARCHAR(191) NULL,
+    `filename` VARCHAR(191) NOT NULL,
+    `mimeType` VARCHAR(191) NOT NULL,
+    `sizeBytes` INTEGER NOT NULL,
+    `storagePath` TEXT NOT NULL,
+    `parsedContent` LONGTEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `Attachment_conversationId_idx`(`conversationId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "MemoryItem" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "category" TEXT NOT NULL,
-    "content" TEXT NOT NULL,
-    "confidence" REAL NOT NULL DEFAULT 1.0,
-    "sourceConversationId" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "MemoryItem_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `MemoryItem` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `category` VARCHAR(191) NOT NULL,
+    `content` LONGTEXT NOT NULL,
+    `confidence` DOUBLE NOT NULL DEFAULT 1.0,
+    `sourceConversationId` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `MemoryItem_userId_idx`(`userId`),
+    INDEX `MemoryItem_category_idx`(`category`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "KnowledgeBase" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "description" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "KnowledgeBase_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `KnowledgeBase` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `name` VARCHAR(191) NOT NULL,
+    `description` TEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `KnowledgeBase_userId_idx`(`userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "DocumentChunk" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "knowledgeBaseId" TEXT NOT NULL,
-    "title" TEXT,
-    "content" TEXT NOT NULL,
-    "tokenCount" INTEGER NOT NULL DEFAULT 0,
-    "chunkIndex" INTEGER NOT NULL DEFAULT 0,
-    "metadata" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "DocumentChunk_knowledgeBaseId_fkey" FOREIGN KEY ("knowledgeBaseId") REFERENCES "KnowledgeBase" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `DocumentChunk` (
+    `id` VARCHAR(191) NOT NULL,
+    `knowledgeBaseId` VARCHAR(191) NOT NULL,
+    `title` VARCHAR(191) NULL,
+    `content` LONGTEXT NOT NULL,
+    `tokenCount` INTEGER NOT NULL DEFAULT 0,
+    `chunkIndex` INTEGER NOT NULL DEFAULT 0,
+    `metadata` LONGTEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `DocumentChunk_knowledgeBaseId_idx`(`knowledgeBaseId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "WorkspaceProject" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "userId" TEXT NOT NULL,
-    "name" TEXT NOT NULL,
-    "repoUrl" TEXT,
-    "localPath" TEXT NOT NULL,
-    "defaultBranch" TEXT NOT NULL DEFAULT 'main',
-    "settings" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "WorkspaceProject_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `WorkspaceProject` (
+    `id` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `name` VARCHAR(191) NOT NULL,
+    `repoUrl` TEXT NULL,
+    `localPath` TEXT NOT NULL,
+    `defaultBranch` VARCHAR(191) NOT NULL DEFAULT 'main',
+    `settings` LONGTEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `WorkspaceProject_userId_idx`(`userId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "AgentTask" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "projectId" TEXT NOT NULL,
-    "userId" TEXT NOT NULL,
-    "prompt" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'QUEUED',
-    "plan" TEXT,
-    "resultSummary" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "updatedAt" DATETIME NOT NULL,
-    CONSTRAINT "AgentTask_projectId_fkey" FOREIGN KEY ("projectId") REFERENCES "WorkspaceProject" ("id") ON DELETE CASCADE ON UPDATE CASCADE,
-    CONSTRAINT "AgentTask_userId_fkey" FOREIGN KEY ("userId") REFERENCES "User" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `AgentTask` (
+    `id` VARCHAR(191) NOT NULL,
+    `projectId` VARCHAR(191) NOT NULL,
+    `userId` VARCHAR(191) NOT NULL,
+    `prompt` LONGTEXT NOT NULL,
+    `status` VARCHAR(191) NOT NULL DEFAULT 'QUEUED',
+    `plan` LONGTEXT NULL,
+    `resultSummary` LONGTEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `updatedAt` DATETIME(3) NOT NULL,
+
+    INDEX `AgentTask_projectId_idx`(`projectId`),
+    INDEX `AgentTask_userId_idx`(`userId`),
+    INDEX `AgentTask_status_idx`(`status`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "Checkpoint" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "taskId" TEXT NOT NULL,
-    "snapshotHash" TEXT NOT NULL,
-    "description" TEXT NOT NULL,
-    "filesChanged" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    CONSTRAINT "Checkpoint_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "AgentTask" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `Checkpoint` (
+    `id` VARCHAR(191) NOT NULL,
+    `taskId` VARCHAR(191) NOT NULL,
+    `snapshotHash` VARCHAR(191) NOT NULL,
+    `description` TEXT NOT NULL,
+    `filesChanged` LONGTEXT NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+
+    INDEX `Checkpoint_taskId_idx`(`taskId`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
 -- CreateTable
-CREATE TABLE "CommandApproval" (
-    "id" TEXT NOT NULL PRIMARY KEY,
-    "taskId" TEXT NOT NULL,
-    "command" TEXT NOT NULL,
-    "riskTier" TEXT NOT NULL,
-    "status" TEXT NOT NULL DEFAULT 'PENDING',
-    "approvedByUserId" TEXT,
-    "createdAt" DATETIME NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    "resolvedAt" DATETIME,
-    CONSTRAINT "CommandApproval_taskId_fkey" FOREIGN KEY ("taskId") REFERENCES "AgentTask" ("id") ON DELETE CASCADE ON UPDATE CASCADE
-);
+CREATE TABLE `CommandApproval` (
+    `id` VARCHAR(191) NOT NULL,
+    `taskId` VARCHAR(191) NOT NULL,
+    `command` TEXT NOT NULL,
+    `riskTier` VARCHAR(191) NOT NULL,
+    `status` VARCHAR(191) NOT NULL DEFAULT 'PENDING',
+    `approvedByUserId` VARCHAR(191) NULL,
+    `createdAt` DATETIME(3) NOT NULL DEFAULT CURRENT_TIMESTAMP(3),
+    `resolvedAt` DATETIME(3) NULL,
 
--- CreateIndex
-CREATE UNIQUE INDEX "User_email_key" ON "User"("email");
+    INDEX `CommandApproval_taskId_idx`(`taskId`),
+    INDEX `CommandApproval_status_idx`(`status`),
+    PRIMARY KEY (`id`)
+) DEFAULT CHARACTER SET utf8mb4 COLLATE utf8mb4_unicode_ci;
 
--- CreateIndex
-CREATE INDEX "User_email_idx" ON "User"("email");
+-- AddForeignKey
+ALTER TABLE `Session` ADD CONSTRAINT `Session_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE UNIQUE INDEX "Session_tokenHash_key" ON "Session"("tokenHash");
+-- AddForeignKey
+ALTER TABLE `AuditLog` ADD CONSTRAINT `AuditLog_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "Session_userId_idx" ON "Session"("userId");
+-- AddForeignKey
+ALTER TABLE `ProviderKey` ADD CONSTRAINT `ProviderKey_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "AuditLog_action_idx" ON "AuditLog"("action");
+-- AddForeignKey
+ALTER TABLE `Conversation` ADD CONSTRAINT `Conversation_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "AuditLog_userId_idx" ON "AuditLog"("userId");
+-- AddForeignKey
+ALTER TABLE `Message` ADD CONSTRAINT `Message_conversationId_fkey` FOREIGN KEY (`conversationId`) REFERENCES `Conversation`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "AuditLog_createdAt_idx" ON "AuditLog"("createdAt");
+-- AddForeignKey
+ALTER TABLE `Attachment` ADD CONSTRAINT `Attachment_conversationId_fkey` FOREIGN KEY (`conversationId`) REFERENCES `Conversation`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE UNIQUE INDEX "ProviderKey_userId_provider_key" ON "ProviderKey"("userId", "provider");
+-- AddForeignKey
+ALTER TABLE `Attachment` ADD CONSTRAINT `Attachment_messageId_fkey` FOREIGN KEY (`messageId`) REFERENCES `Message`(`id`) ON DELETE SET NULL ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "Conversation_userId_idx" ON "Conversation"("userId");
+-- AddForeignKey
+ALTER TABLE `MemoryItem` ADD CONSTRAINT `MemoryItem_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "Conversation_updatedAt_idx" ON "Conversation"("updatedAt");
+-- AddForeignKey
+ALTER TABLE `KnowledgeBase` ADD CONSTRAINT `KnowledgeBase_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "Message_conversationId_idx" ON "Message"("conversationId");
+-- AddForeignKey
+ALTER TABLE `DocumentChunk` ADD CONSTRAINT `DocumentChunk_knowledgeBaseId_fkey` FOREIGN KEY (`knowledgeBaseId`) REFERENCES `KnowledgeBase`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "Attachment_conversationId_idx" ON "Attachment"("conversationId");
+-- AddForeignKey
+ALTER TABLE `WorkspaceProject` ADD CONSTRAINT `WorkspaceProject_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "MemoryItem_userId_idx" ON "MemoryItem"("userId");
+-- AddForeignKey
+ALTER TABLE `AgentTask` ADD CONSTRAINT `AgentTask_projectId_fkey` FOREIGN KEY (`projectId`) REFERENCES `WorkspaceProject`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "MemoryItem_category_idx" ON "MemoryItem"("category");
+-- AddForeignKey
+ALTER TABLE `AgentTask` ADD CONSTRAINT `AgentTask_userId_fkey` FOREIGN KEY (`userId`) REFERENCES `User`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "KnowledgeBase_userId_idx" ON "KnowledgeBase"("userId");
+-- AddForeignKey
+ALTER TABLE `Checkpoint` ADD CONSTRAINT `Checkpoint_taskId_fkey` FOREIGN KEY (`taskId`) REFERENCES `AgentTask`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;
 
--- CreateIndex
-CREATE INDEX "DocumentChunk_knowledgeBaseId_idx" ON "DocumentChunk"("knowledgeBaseId");
-
--- CreateIndex
-CREATE INDEX "WorkspaceProject_userId_idx" ON "WorkspaceProject"("userId");
-
--- CreateIndex
-CREATE INDEX "AgentTask_projectId_idx" ON "AgentTask"("projectId");
-
--- CreateIndex
-CREATE INDEX "AgentTask_userId_idx" ON "AgentTask"("userId");
-
--- CreateIndex
-CREATE INDEX "AgentTask_status_idx" ON "AgentTask"("status");
-
--- CreateIndex
-CREATE INDEX "Checkpoint_taskId_idx" ON "Checkpoint"("taskId");
-
--- CreateIndex
-CREATE INDEX "CommandApproval_taskId_idx" ON "CommandApproval"("taskId");
-
--- CreateIndex
-CREATE INDEX "CommandApproval_status_idx" ON "CommandApproval"("status");
+-- AddForeignKey
+ALTER TABLE `CommandApproval` ADD CONSTRAINT `CommandApproval_taskId_fkey` FOREIGN KEY (`taskId`) REFERENCES `AgentTask`(`id`) ON DELETE CASCADE ON UPDATE CASCADE;

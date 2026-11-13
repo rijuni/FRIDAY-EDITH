@@ -1,7 +1,8 @@
 // ==============================================================================
-// F.R.I.D.A.Y. + E.D.I.T.H. Canonical Database Schema
-// Blueprint Version: 2.1
-// Supported Providers: SQLite (Local Development) & MySQL (Target Production)
+// F.R.I.D.A.Y. + E.D.I.T.H. MySQL 8.4 Production Schema
+// Kept in 1:1 model/field parity with prisma/schema.prisma (SQLite local dev),
+// adding @db.Text / @db.LongText annotations so MySQL does not truncate at VARCHAR(191).
+// Verified by: npm run db:validate:mysql --workspace=@friday-edith/api
 // ==============================================================================
 
 generator client {
@@ -9,36 +10,28 @@ generator client {
 }
 
 datasource db {
-  provider = "sqlite"
+  provider = "mysql"
   url      = env("DATABASE_URL")
 }
-
-// ------------------------------------------------------------------------------
-// Shared Platform Models (Identity, Sessions & Audit)
-// ------------------------------------------------------------------------------
 
 model User {
   id           String        @id @default(cuid())
   email        String        @unique
   name         String?
-  passwordHash String
+  passwordHash String        @db.Text
   role         String        @default("USER") // USER, DEVELOPER, ADMIN
   isActive     Boolean       @default(true)
   createdAt    DateTime      @default(now())
   updatedAt    DateTime      @updatedAt
 
-  sessions     Session[]
-  auditLogs    AuditLog[]
-  providerKeys ProviderKey[]
-
-  // F.R.I.D.A.Y. Relations
-  conversations   Conversation[]
-  memories        MemoryItem[]
-  knowledgeBases  KnowledgeBase[]
-
-  // E.D.I.T.H. Relations
-  projects        WorkspaceProject[]
-  agentTasks      AgentTask[]
+  sessions       Session[]
+  auditLogs      AuditLog[]
+  providerKeys   ProviderKey[]
+  conversations  Conversation[]
+  memories       MemoryItem[]
+  knowledgeBases KnowledgeBase[]
+  projects       WorkspaceProject[]
+  agentTasks     AgentTask[]
 
   @@index([email])
 }
@@ -47,7 +40,7 @@ model Session {
   id         String   @id @default(cuid())
   userId     String
   tokenHash  String   @unique
-  userAgent  String?
+  userAgent  String?  @db.Text
   ipAddress  String?
   expiresAt  DateTime
   createdAt  DateTime @default(now())
@@ -63,8 +56,8 @@ model AuditLog {
   userId       String?
   resourceType String
   resourceId   String?
-  status       String   @default("SUCCESS") // SUCCESS, FAILURE, DENIED
-  details      String?  // JSON stringified payload for SQLite/MySQL cross-compatibility
+  status       String   @default("SUCCESS")
+  details      String?  @db.LongText
   ip           String?
   createdAt    DateTime @default(now())
 
@@ -78,8 +71,8 @@ model AuditLog {
 model ProviderKey {
   id           String   @id @default(cuid())
   userId       String
-  provider     String   // openai, anthropic, gemini, custom
-  encryptedKey String
+  provider     String
+  encryptedKey String   @db.Text
   isDefault    Boolean  @default(false)
   createdAt    DateTime @default(now())
 
@@ -87,10 +80,6 @@ model ProviderKey {
 
   @@unique([userId, provider])
 }
-
-// ------------------------------------------------------------------------------
-// F.R.I.D.A.Y. Models (Conversational AI, Memory & RAG)
-// ------------------------------------------------------------------------------
 
 model Conversation {
   id              String        @id @default(cuid())
@@ -100,7 +89,7 @@ model Conversation {
   isPinned        Boolean       @default(false)
   isArchived      Boolean       @default(false)
   modelPreference String?
-  systemPrompt    String?
+  systemPrompt    String?       @db.LongText
   createdAt       DateTime      @default(now())
   updatedAt       DateTime      @updatedAt
 
@@ -115,10 +104,10 @@ model Conversation {
 model Message {
   id               String       @id @default(cuid())
   conversationId   String
-  role             String       // user, assistant, system, tool
-  content          String
-  reasoningContent String?
-  metadata         String?      // JSON stringified metadata (citations, token usage, tool args)
+  role             String
+  content          String       @db.LongText
+  reasoningContent String?      @db.LongText
+  metadata         String?      @db.LongText
   createdAt        DateTime     @default(now())
 
   conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -134,8 +123,8 @@ model Attachment {
   filename       String
   mimeType       String
   sizeBytes      Int
-  storagePath    String
-  parsedContent  String?
+  storagePath    String        @db.Text
+  parsedContent  String?       @db.LongText
   createdAt      DateTime      @default(now())
 
   conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
@@ -145,16 +134,16 @@ model Attachment {
 }
 
 model MemoryItem {
-  id                   String        @id @default(cuid())
+  id                   String   @id @default(cuid())
   userId               String
-  category             String        // user_preference, project_context, coding_style, personal_fact
-  content              String
-  confidence           Float         @default(1.0)
+  category             String
+  content              String   @db.LongText
+  confidence           Float    @default(1.0)
   sourceConversationId String?
-  createdAt            DateTime      @default(now())
-  updatedAt            DateTime      @updatedAt
+  createdAt            DateTime @default(now())
+  updatedAt            DateTime @updatedAt
 
-  user                 User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([category])
@@ -164,7 +153,7 @@ model KnowledgeBase {
   id          String          @id @default(cuid())
   userId      String
   name        String
-  description String?
+  description String?         @db.Text
   createdAt   DateTime        @default(now())
 
   user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
@@ -177,10 +166,10 @@ model DocumentChunk {
   id              String        @id @default(cuid())
   knowledgeBaseId String
   title           String?
-  content         String
+  content         String        @db.LongText
   tokenCount      Int           @default(0)
   chunkIndex      Int           @default(0)
-  metadata        String?       // JSON stringified chunk properties
+  metadata        String?       @db.LongText
   createdAt       DateTime      @default(now())
 
   knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
@@ -188,18 +177,14 @@ model DocumentChunk {
   @@index([knowledgeBaseId])
 }
 
-// ------------------------------------------------------------------------------
-// E.D.I.T.H. Models (Developer IDE & Autonomous Agent)
-// ------------------------------------------------------------------------------
-
 model WorkspaceProject {
   id            String      @id @default(cuid())
   userId        String
   name          String
-  repoUrl       String?
-  localPath     String
+  repoUrl       String?     @db.Text
+  localPath     String      @db.Text
   defaultBranch String      @default("main")
-  settings      String?     // JSON stringified settings (build commands, runner preferences)
+  settings      String?     @db.LongText
   createdAt     DateTime    @default(now())
   updatedAt     DateTime    @updatedAt
 
@@ -210,18 +195,18 @@ model WorkspaceProject {
 }
 
 model AgentTask {
-  id            String             @id @default(cuid())
+  id            String            @id @default(cuid())
   projectId     String
   userId        String
-  prompt        String
-  status        String             @default("QUEUED") // QUEUED, RUNNING, WAITING_APPROVAL, SUCCEEDED, FAILED, CANCELLED, TIMED_OUT
-  plan          String?            // JSON stringified execution plan
-  resultSummary String?
-  createdAt     DateTime           @default(now())
-  updatedAt     DateTime           @updatedAt
+  prompt        String            @db.LongText
+  status        String            @default("QUEUED")
+  plan          String?           @db.LongText
+  resultSummary String?           @db.LongText
+  createdAt     DateTime          @default(now())
+  updatedAt     DateTime          @updatedAt
 
-  project       WorkspaceProject   @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user          User               @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project       WorkspaceProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
   checkpoints   Checkpoint[]
   approvals     CommandApproval[]
 
@@ -234,8 +219,8 @@ model Checkpoint {
   id           String    @id @default(cuid())
   taskId       String
   snapshotHash String
-  description  String
-  filesChanged String?   // JSON stringified list of modified files & unified diffs
+  description  String    @db.Text
+  filesChanged String?   @db.LongText
   createdAt    DateTime  @default(now())
 
   task         AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
@@ -246,9 +231,9 @@ model Checkpoint {
 model CommandApproval {
   id               String    @id @default(cuid())
   taskId           String
-  command          String
-  riskTier         String    // READ_ONLY, SAFE_EDIT, DESTRUCTIVE_COMMAND, NETWORK_ACCESS, GIT_PUSH
-  status           String    @default("PENDING") // PENDING, APPROVED, REJECTED
+  command          String    @db.Text
+  riskTier         String
+  status           String    @default("PENDING")
   approvedByUserId String?
   createdAt        DateTime  @default(now())
   resolvedAt       DateTime?
