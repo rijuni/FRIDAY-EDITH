@@ -1,7 +1,7 @@
 // ==============================================================================
-// F.R.I.D.A.Y. + E.D.I.T.H. MySQL 8.4 Production Schema
-// Kept in 1:1 model/field parity with prisma/schema.prisma (SQLite local dev),
-// adding @db.Text / @db.LongText annotations so MySQL does not truncate at VARCHAR(191).
+// F.R.I.D.A.Y. + E.D.I.T.H. Canonical Database Schema (MySQL 8.0 / 8.4)
+// Sole authoritative schema for development, staging, and production environments.
+// Uses @db.Text and @db.LongText to support large text payloads and JSON structures.
 // Verified by: npm run db:validate:mysql --workspace=@friday-edith/api
 // ==============================================================================
 

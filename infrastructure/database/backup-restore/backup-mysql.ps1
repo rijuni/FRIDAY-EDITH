@@ -1,6 +1,6 @@
-<#
+﻿<#
 .SYNOPSIS
-  Automated MySQL 8.4 database backup utility for F.R.I.D.A.Y. + E.D.I.T.H.
+  Automated MySQL 8.0 / 8.4 database backup utility for F.R.I.D.A.Y. + E.D.I.T.H.
 .DESCRIPTION
   Extracts connection parameters from DATABASE_URL or arguments and executes
   mysqldump with strict transaction isolation and utf8mb4 encoding.
@@ -84,7 +84,8 @@ try {
     throw "mysqldump exited with code $LASTEXITCODE"
   }
   $sizeBytes = (Get-Item $targetFile).Length
-  Write-Host "✅ Backup completed successfully: $targetFile ($([Math]::Round($sizeBytes / 1024, 2)) KB)"
+  $sizeKb = [Math]::Round($sizeBytes / 1024, 2)
+  Write-Host "✅ Backup completed successfully: $targetFile ($sizeKb KB)"
 } finally {
   $env:MYSQL_PWD = ""
 }

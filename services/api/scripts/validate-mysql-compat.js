@@ -99,16 +99,6 @@ export function validateMySqlCompatibility() {
     }
   }
 
-  // Also verify parity with helper schema files if present
-  const mysqlSchemaPath = path.join(PRISMA_DIR, 'schema.mysql.prisma');
-  if (fs.existsSync(mysqlSchemaPath)) {
-    const mysqlText = fs.readFileSync(mysqlSchemaPath, 'utf8');
-    const mysqlModels = parseModels(mysqlText);
-    if (mysqlModels.size !== models.size) {
-      errors.push(`Model count mismatch between schema.prisma (${models.size}) and schema.mysql.prisma (${mysqlModels.size}).`);
-    }
-  }
-
   return { ok: errors.length === 0, modelCount: models.size, errors };
 }
 
@@ -118,10 +108,10 @@ const isMain =
 if (isMain) {
   const result = validateMySqlCompatibility();
   if (!result.ok) {
-    console.error('❌ MySQL 8.4 compatibility check failed:');
+    console.error('❌ MySQL schema compatibility check failed:');
     for (const err of result.errors) console.error(`  - ${err}`);
     process.exit(1);
   }
-  console.log(`✅ MySQL 8.4 schema compatibility verified across all ${result.modelCount} Prisma models.`);
+  console.log(`✅ MySQL canonical schema compatibility verified across all ${result.modelCount} Prisma models.`);
 }
 

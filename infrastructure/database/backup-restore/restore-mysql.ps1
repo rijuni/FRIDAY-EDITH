@@ -1,6 +1,6 @@
 <#
 .SYNOPSIS
-  Automated MySQL 8.4 database restore utility for F.R.I.D.A.Y. + E.D.I.T.H.
+  Automated MySQL 8.0 / 8.4 database restore utility for F.R.I.D.A.Y. + E.D.I.T.H.
 .DESCRIPTION
   Restores a MySQL dump file into the target database.
 #>

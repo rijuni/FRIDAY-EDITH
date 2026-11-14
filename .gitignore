@@ -17,10 +17,18 @@ htmlcov/
 
 # Environment Variables & Secrets
 .env
-.env.local
-.env.*.local
+.env.*
+!.env.example
 *.pem
 *.key
+
+# Temporary & Archive Directories
+.tmp/
+tmp/
+*.zip
+*.tar.gz
+*.tgz
+*.rar
 
 # Build & Bundler Outputs
 dist/
@@ -35,6 +43,8 @@ build/
 *.db-journal
 *.db-wal
 *.db-shm
+infrastructure/database/backup-restore/backups/
+*.sql.bak
 
 # Runner & Execution Workspaces
 runner-host/workspace/

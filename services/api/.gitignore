@@ -1,0 +1,4 @@
+# API Local Environment Secrets & Backups
+.env
+.env.*
+!.env.example
