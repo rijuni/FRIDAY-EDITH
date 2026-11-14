@@ -19,6 +19,12 @@ const envSchema = z.object({
   HOST: z.string().default('0.0.0.0'),
   CORS_ORIGIN: z.string().default('http://localhost:5173'),
 
+  // Database Persistence
+  DATABASE_URL: z
+    .string()
+    .startsWith('mysql://', 'DATABASE_URL must be a valid mysql:// connection string')
+    .default('mysql://friday_user:friday_password@localhost:3306/friday_edith_db'),
+
   // Auth & Secrets
   JWT_SECRET: z.string().min(16).default(DEFAULT_DEV_JWT_SECRET),
   JWT_ISSUER: z.string().default('friday-edith-api'),

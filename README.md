@@ -11,7 +11,7 @@
 ## Architecture & Technology Stack
 
 - **Frontend (`apps/web`):** React 18, JavaScript, Vite, Tailwind CSS, Three.js / React Three Fiber / Drei, Monaco Editor, xterm.js, Zustand.
-- **Application Backend (`services/api`):** Node.js, Express.js, JavaScript, Prisma ORM (SQLite local dev via `prisma/schema.prisma`, MySQL 8.4 production target via `prisma/mysql/schema.prisma`), Zod validation.
+- **Application Backend (`services/api`):** Node.js, Express.js, JavaScript, Prisma ORM (MySQL 8.4 canonical engine via `prisma/schema.prisma`), Zod validation.
 - **AI Microservices:** Python, FastAPI, Pydantic (`services/friday-ai` on `:8001` and `services/edith-engine` on `:8002`), authenticated via `X-Internal-Service-Token` (`INTERNAL_SERVICE_SECRET`) + `X-User-Id`.
 - **Code Execution:** Disabled by default. The current Windows VM and restricted-user scripts do not provision or verify an isolation boundary; the runner returns unavailable until a real backend is implemented.
 
@@ -45,10 +45,8 @@ Friday-Edith/
 npm install
 Copy-Item .env.example .env
 
-# Initialize local development database (SQLite)
-npm run db:deploy:sqlite
-
-# Validate MySQL 8.4 schema parity
+# Deploy database migrations & seed baseline records (MySQL 8.4)
+npm run db:migrate
 npm run db:validate:mysql
 npm run db:seed
 
@@ -60,8 +58,7 @@ npm run dev:runner    # Starts runner status service; command execution remains 
 
 ## Database migrations
 
-SQLite development and MySQL production use separate Prisma migration histories:
-`services/api/prisma/migrations` and `services/api/prisma/mysql/migrations`. The MySQL migration schema is a checked copy of `schema.mysql.prisma`; `npm run db:validate:mysql` checks that copy and model parity.
+MySQL 8.4 is the canonical database technology for development, staging, and production. Migrations are managed via Prisma in `services/api/prisma/migrations`. Use `npm run db:migrate` to apply pending migrations and `npm run db:validate:mysql` to verify schema compatibility and model definitions.
 
 Set `DATABASE_URL` to a MySQL connection string before running `npm run db:deploy:mysql`. For an existing database, first confirm that its tables match the initial migration, then baseline that database with Prisma `migrate resolve --applied 20261113000000_init` using the matching schema. Do not apply the initial migration to a populated database that has not been baselined.
 

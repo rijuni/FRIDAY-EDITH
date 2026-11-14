@@ -11,10 +11,9 @@
     "dev": "node --watch src/server.js",
     "start": "node src/server.js",
     "prisma:generate": "prisma generate",
-    "prisma:generate:mysql": "prisma generate --schema prisma/mysql/schema.prisma",
     "prisma:migrate:dev": "prisma migrate dev",
-    "prisma:migrate:deploy:sqlite": "node scripts/migrate-deploy.js sqlite",
-    "prisma:migrate:deploy:mysql": "node scripts/migrate-deploy.js mysql",
+    "prisma:migrate:deploy": "node scripts/migrate-deploy.js",
+    "prisma:migrate:deploy:mysql": "node scripts/migrate-deploy.js",
     "prisma:seed": "node prisma/seed/seed.js",
     "db:validate:mysql": "node scripts/validate-mysql-compat.js",
     "test": "node --test src/tests/*.test.js"

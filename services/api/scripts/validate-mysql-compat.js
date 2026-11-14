@@ -48,60 +48,68 @@ function parseModels(schemaText) {
   return models;
 }
 
-export function validateMySqlCompatibility() {
-  const sqliteSchemaPath = path.join(PRISMA_DIR, 'schema.prisma');
-  const mysqlSchemaPath = path.join(PRISMA_DIR, 'schema.mysql.prisma');
-  const mysqlMigrationSchemaPath = path.join(PRISMA_DIR, 'mysql', 'schema.prisma');
+const EXPECTED_MODELS = new Set([
+  'User',
+  'Session',
+  'AuditLog',
+  'ProviderKey',
+  'Conversation',
+  'Message',
+  'Attachment',
+  'MemoryItem',
+  'KnowledgeBase',
+  'DocumentChunk',
+  'WorkspaceProject',
+  'AgentTask',
+  'Checkpoint',
+  'CommandApproval'
+]);
 
-  const sqliteText = fs.readFileSync(sqliteSchemaPath, 'utf8');
-  const mysqlText = fs.readFileSync(mysqlSchemaPath, 'utf8');
-  const mysqlMigrationSchemaText = fs.readFileSync(mysqlMigrationSchemaPath, 'utf8');
+export function validateMySqlCompatibility() {
+  const schemaPath = path.join(PRISMA_DIR, 'schema.prisma');
+  if (!fs.existsSync(schemaPath)) {
+    return { ok: false, modelCount: 0, errors: ['prisma/schema.prisma does not exist.'] };
+  }
+
+  const schemaText = fs.readFileSync(schemaPath, 'utf8');
   const errors = [];
 
-  if (mysqlText.replace(/\r\n/g, '\n').trim() !== mysqlMigrationSchemaText.replace(/\r\n/g, '\n').trim()) {
-    errors.push('prisma/mysql/schema.prisma must match canonical schema.mysql.prisma.');
+  if (!/provider\s*=\s*"mysql"/.test(schemaText)) {
+    errors.push('prisma/schema.prisma must declare provider = "mysql".');
   }
 
-  if (!/provider\s*=\s*"mysql"/.test(mysqlText)) {
-    errors.push('schema.mysql.prisma must declare provider = "mysql".');
+  const models = parseModels(schemaText);
+
+  for (const expectedModel of EXPECTED_MODELS) {
+    if (!models.has(expectedModel)) {
+      errors.push(`Missing expected model in schema.prisma: ${expectedModel}`);
+    }
   }
 
-  const sqliteModels = parseModels(sqliteText);
-  const mysqlModels = parseModels(mysqlText);
-
-  for (const [modelName, sqliteFields] of sqliteModels) {
-    const mysqlFields = mysqlModels.get(modelName);
-    if (!mysqlFields) {
-      errors.push(`Missing model in schema.mysql.prisma: ${modelName}`);
-      continue;
+  for (const [modelName, fields] of models) {
+    if (!fields.has('id')) {
+      errors.push(`Model ${modelName} missing primary key 'id'.`);
     }
 
-    for (const [fieldName, sqliteMeta] of sqliteFields) {
-      const mysqlMeta = mysqlFields.get(fieldName);
-      if (!mysqlMeta) {
-        errors.push(`Missing field in schema.mysql.prisma: ${modelName}.${fieldName}`);
-        continue;
-      }
-      if (sqliteMeta.type !== mysqlMeta.type) {
-        errors.push(
-          `Field type mismatch on ${modelName}.${fieldName}: sqlite=${sqliteMeta.type} vs mysql=${mysqlMeta.type}`
-        );
-      }
-
+    for (const [fieldName, fieldMeta] of fields) {
       const key = `${modelName}.${fieldName}`;
-      if (LARGE_TEXT_FIELDS.has(key) && !/@db\.(LongText|Text)\b/.test(mysqlMeta.raw)) {
-        errors.push(`Large text field ${key} in schema.mysql.prisma must specify @db.Text or @db.LongText.`);
+      if (LARGE_TEXT_FIELDS.has(key) && !/@db\.(LongText|Text)\b/.test(fieldMeta.raw)) {
+        errors.push(`Large text field ${key} in schema.prisma must specify @db.Text or @db.LongText.`);
       }
     }
   }
 
-  for (const modelName of mysqlModels.keys()) {
-    if (!sqliteModels.has(modelName)) {
-      errors.push(`Extra model in schema.mysql.prisma not present in schema.prisma: ${modelName}`);
+  // Also verify parity with helper schema files if present
+  const mysqlSchemaPath = path.join(PRISMA_DIR, 'schema.mysql.prisma');
+  if (fs.existsSync(mysqlSchemaPath)) {
+    const mysqlText = fs.readFileSync(mysqlSchemaPath, 'utf8');
+    const mysqlModels = parseModels(mysqlText);
+    if (mysqlModels.size !== models.size) {
+      errors.push(`Model count mismatch between schema.prisma (${models.size}) and schema.mysql.prisma (${mysqlModels.size}).`);
     }
   }
 
-  return { ok: errors.length === 0, modelCount: sqliteModels.size, errors };
+  return { ok: errors.length === 0, modelCount: models.size, errors };
 }
 
 const isMain =
