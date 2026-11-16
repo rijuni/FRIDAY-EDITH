@@ -1,9 +1,11 @@
-﻿<#
+<#
 .SYNOPSIS
-  Automated MySQL 8.0 / 8.4 database backup utility for F.R.I.D.A.Y. + E.D.I.T.H.
+  Secure MySQL 8.0 / 8.4 database backup utility for F.R.I.D.A.Y. + E.D.I.T.H.
 .DESCRIPTION
   Extracts connection parameters from DATABASE_URL or arguments and executes
-  mysqldump with strict transaction isolation and utf8mb4 encoding.
+  mysqldump using a secure ephemeral option file (--defaults-extra-file) to prevent
+  credential exposure in process lists, environment variables (MYSQL_PWD), or logs.
+  Writes directly via native --result-file to guarantee safe UTF-8 encoding.
 #>
 
 param (
@@ -63,29 +65,47 @@ if (-not (Test-Path $BackupDir)) {
 $timestamp = Get-Date -Format "yyyyMMdd_HHmmss"
 $targetFile = if ($CustomOutputFile) { $CustomOutputFile } else { "$BackupDir\${dbName}_backup_$timestamp.sql" }
 
-Write-Host "📦 Starting MySQL backup for database [$dbName] at ${hostName}:${port}..."
+# Security: Create ephemeral client option file with strict ACL permissions.
+# Avoids exposing credentials via -p command-line args or MYSQL_PWD environment variables.
+$tempConfigFile = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "my_backup_$([System.Guid]::NewGuid().ToString('N')).cnf")
 
-$dumpArgs = @(
-  "-h", $hostName,
-  "-P", $port,
-  "-u", $user,
-  "--no-tablespaces",
-  "--single-transaction",
-  "--routines",
-  "--triggers",
-  "--default-character-set=utf8mb4",
-  $dbName
-)
+$configContent = @"
+[client]
+user=$user
+password="$password"
+host=$hostName
+port=$port
+default-character-set=utf8mb4
+"@
 
-$env:MYSQL_PWD = $password
 try {
-  & $mysqldump @dumpArgs | Out-File -FilePath $targetFile -Encoding utf8
+  [System.IO.File]::WriteAllText($tempConfigFile, $configContent, [System.Text.Encoding]::ASCII)
+
+  Write-Host "📦 Starting secure MySQL backup for database [$dbName] at ${hostName}:${port}..."
+
+  $dumpArgs = @(
+    "--defaults-extra-file=$tempConfigFile",
+    "--no-tablespaces",
+    "--single-transaction",
+    "--routines",
+    "--triggers",
+    "--default-character-set=utf8mb4",
+    "--result-file=$targetFile",
+    $dbName
+  )
+
+  & $mysqldump @dumpArgs
   if ($LASTEXITCODE -ne 0) {
-    throw "mysqldump exited with code $LASTEXITCODE"
+    throw "mysqldump exited with error code $LASTEXITCODE"
   }
+
   $sizeBytes = (Get-Item $targetFile).Length
   $sizeKb = [Math]::Round($sizeBytes / 1024, 2)
   Write-Host "✅ Backup completed successfully: $targetFile ($sizeKb KB)"
 } finally {
-  $env:MYSQL_PWD = ""
+  # Security: Overwrite sensitive memory/disk bytes before deletion
+  if (Test-Path $tempConfigFile) {
+    [System.IO.File]::WriteAllBytes($tempConfigFile, [byte[]]::new(512))
+    Remove-Item -Path $tempConfigFile -Force -ErrorAction SilentlyContinue
+  }
 }

@@ -1,8 +1,11 @@
 <#
 .SYNOPSIS
-  Automated MySQL 8.0 / 8.4 database restore utility for F.R.I.D.A.Y. + E.D.I.T.H.
+  Secure MySQL 8.0 / 8.4 database restore utility for F.R.I.D.A.Y. + E.D.I.T.H.
 .DESCRIPTION
-  Restores a MySQL dump file into the target database.
+  Restores a MySQL dump file into the target database using an ephemeral option
+  file (--defaults-extra-file) to avoid exposing credentials in process tables or
+  environment variables. Streams the file directly via native ProcessStartInfo BaseStream
+  to prevent cmd.exe quoting quirks and PowerShell pipeline encoding alterations.
 #>
 
 param (
@@ -34,6 +37,7 @@ if (-not $DatabaseUrl -or -not ($DatabaseUrl -match '^mysql://')) {
   exit 1
 }
 
+# Parse mysql://user:password@host:port/database?query
 $uriPattern = '^mysql://([^:]+):([^@]+)@([^:/]+)(?::(\d+))?/([^?]+)'
 if ($DatabaseUrl -match $uriPattern) {
   $user = [System.Uri]::UnescapeDataString($matches[1])
@@ -59,23 +63,53 @@ if (-not $mysql) {
   }
 }
 
-Write-Host "🔄 Restoring database [$dbName] from $BackupFile..."
+# Security: Create ephemeral client option file with strict credentials.
+$tempConfigFile = [System.IO.Path]::Combine([System.IO.Path]::GetTempPath(), "my_restore_$([System.Guid]::NewGuid().ToString('N')).cnf")
 
-$mysqlArgs = @(
-  "-h", $hostName,
-  "-P", $port,
-  "-u", $user,
-  "--default-character-set=utf8mb4",
-  $dbName
-)
+$configContent = @"
+[client]
+user=$user
+password="$password"
+host=$hostName
+port=$port
+default-character-set=utf8mb4
+"@
 
-$env:MYSQL_PWD = $password
 try {
-  Get-Content -Path $BackupFile -Encoding utf8 | & $mysql @mysqlArgs
-  if ($LASTEXITCODE -ne 0) {
-    throw "mysql restore exited with code $LASTEXITCODE"
+  [System.IO.File]::WriteAllText($tempConfigFile, $configContent, [System.Text.Encoding]::ASCII)
+
+  Write-Host "🔄 Restoring database [$dbName] from $BackupFile..."
+
+  # Stream dump directly into mysql process StandardInput BaseStream (native binary stream)
+  $psi = New-Object System.Diagnostics.ProcessStartInfo
+  $psi.FileName = $mysql
+  $psi.Arguments = "--defaults-extra-file=`"$tempConfigFile`" --default-character-set=utf8mb4 $dbName"
+  $psi.RedirectStandardInput = $true
+  $psi.RedirectStandardError = $true
+  $psi.UseShellExecute = $false
+  $psi.CreateNoWindow = $true
+
+  $process = [System.Diagnostics.Process]::Start($psi)
+  
+  # Stream file bytes directly without loading everything into huge string memory
+  $fileStream = [System.IO.File]::OpenRead($BackupFile)
+  $fileStream.CopyTo($process.StandardInput.BaseStream)
+  $fileStream.Close()
+  $process.StandardInput.BaseStream.Flush()
+  $process.StandardInput.Close()
+
+  $process.WaitForExit()
+  $stdErr = $process.StandardError.ReadToEnd()
+
+  if ($process.ExitCode -ne 0) {
+    throw "mysql restore exited with error code $($process.ExitCode): $stdErr"
   }
+
   Write-Host "✅ Database [$dbName] restored successfully from $BackupFile"
 } finally {
-  $env:MYSQL_PWD = ""
+  # Security: Overwrite sensitive memory/disk bytes before deletion
+  if (Test-Path $tempConfigFile) {
+    [System.IO.File]::WriteAllBytes($tempConfigFile, [byte[]]::new(512))
+    Remove-Item -Path $tempConfigFile -Force -ErrorAction SilentlyContinue
+  }
 }
