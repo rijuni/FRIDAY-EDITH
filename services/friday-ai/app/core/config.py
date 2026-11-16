@@ -30,8 +30,8 @@ class Settings(BaseSettings):
     # `auto` routes only recognized model IDs to a configured provider.
     FRIDAY_AI_PROVIDER: str = "mock"
     OPENAI_MODEL: str = "gpt-4o"
-    ANTHROPIC_MODEL: str = "claude-3-7-sonnet"
-    GEMINI_MODEL: str = "gemini-2.0-flash"
+    ANTHROPIC_MODEL: str = "claude-sonnet-4-6"
+    GEMINI_MODEL: str = "gemini-3.8-flash"
     PROVIDER_REQUEST_TIMEOUT_SECONDS: float = 90.0
 
     # Production document uploads require a local ClamAV daemon. Dev mode may

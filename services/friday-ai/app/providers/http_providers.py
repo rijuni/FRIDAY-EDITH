@@ -11,7 +11,7 @@ from app.core.errors import (
     ProviderTimeoutException,
     ProviderUnavailableException,
 )
-from app.providers.base import BaseProvider, NormalizedChunk
+from app.providers.base import BaseProvider, NormalizedChunk, ProviderCapabilities
 
 
 def _messages_for_provider(messages: List[Dict[str, str]]) -> Tuple[List[Dict[str, str]], List[str]]:
@@ -160,6 +160,12 @@ class AnthropicProvider(HttpProvider):
 class GeminiProvider(HttpProvider):
     provider_name = "gemini"
 
+    @property
+    def capabilities(self) -> ProviderCapabilities:
+        # Gemini currently exposes generateContent for the configured models;
+        # the service still emits its normalized event stream after the response.
+        return ProviderCapabilities(streaming=False, is_mock=False)
+
     async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096):
         if not settings.GEMINI_API_KEY:
             raise ProviderConfigurationException(self.provider_name)
@@ -174,26 +180,33 @@ class GeminiProvider(HttpProvider):
         }
         if full_instructions:
             payload["systemInstruction"] = {"parts": [{"text": full_instructions}]}
-        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_id}:streamGenerateContent?alt=sse"
-        client, response = await self._open_stream(
-            url,
-            {"x-goog-api-key": settings.GEMINI_API_KEY, "content-type": "application/json"},
-            payload,
-        )
+        url = f"https://generativelanguage.googleapis.com/v1beta/models/{self.model_id}:generateContent"
         try:
-            async for frame in self._read_sse(response):
-                if frame.get("error"):
-                    raise ProviderUnavailableException(self.provider_name)
-                for candidate in frame.get("candidates", []):
-                    for part in (candidate.get("content") or {}).get("parts", []):
-                        text = part.get("text")
-                        if isinstance(text, str) and text:
-                            yield NormalizedChunk(event="chunk", text=text, metadata={"provider": self.provider_name})
-            yield NormalizedChunk(event="done", metadata={"provider": self.provider_name})
+            async with httpx.AsyncClient(
+                timeout=httpx.Timeout(settings.PROVIDER_REQUEST_TIMEOUT_SECONDS, connect=10.0)
+            ) as client:
+                response = await client.post(
+                    url,
+                    headers={"x-goog-api-key": settings.GEMINI_API_KEY, "content-type": "application/json"},
+                    json=payload,
+                )
+        except asyncio.CancelledError:
+            raise
         except httpx.TimeoutException as exc:
             raise ProviderTimeoutException(self.provider_name) from exc
         except httpx.HTTPError as exc:
             raise ProviderUnavailableException(self.provider_name) from exc
-        finally:
-            await response.aclose()
-            await client.aclose()
+
+        if response.status_code >= 400:
+            raise ProviderUnavailableException(self.provider_name)
+
+        try:
+            body = response.json()
+            for candidate in body.get("candidates", []):
+                for part in (candidate.get("content") or {}).get("parts", []):
+                    text = part.get("text")
+                    if isinstance(text, str) and text:
+                        yield NormalizedChunk(event="chunk", text=text, metadata={"provider": self.provider_name})
+            yield NormalizedChunk(event="done", metadata={"provider": self.provider_name})
+        except (ValueError, TypeError, KeyError) as exc:
+            raise ProviderUnavailableException(self.provider_name) from exc
