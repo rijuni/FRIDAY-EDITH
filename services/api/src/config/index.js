@@ -22,8 +22,7 @@ const envSchema = z.object({
   // Database Persistence
   DATABASE_URL: z
     .string()
-    .startsWith('mysql://', 'DATABASE_URL must be a valid mysql:// connection string')
-    .default('mysql://friday_user:friday_password@localhost:3306/friday_edith_db'),
+    .startsWith('mysql://', 'DATABASE_URL must be a valid mysql:// connection string'),
 
   // Auth & Secrets
   JWT_SECRET: z.string().min(16).default(DEFAULT_DEV_JWT_SECRET),
