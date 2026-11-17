@@ -416,7 +416,13 @@ export function FridayDashboard() {
                     {availableModels.length ? availableModels.map((model) => (
                       <option key={model.id} value={model.id} className="bg-[#120d24] text-white">{model.label}</option>
                     )) : <option value={selectedModel} disabled className="bg-[#120d24] text-white">
-                      {providerMode === 'unavailable' ? 'AI service unavailable' : 'No provider configured'}
+                      {providerMode === 'auth_required'
+                        ? 'Sign in again to load models'
+                        : providerMode === 'forbidden'
+                          ? 'AI models are not available for this account'
+                          : providerMode === 'unavailable'
+                            ? 'AI service unavailable'
+                            : 'No provider configured'}
                     </option>}
                   </select>
                   <ChevronDown className="w-3 h-3 text-slate-400" />

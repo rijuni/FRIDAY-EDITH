@@ -11,6 +11,7 @@ const INITIAL_STATE = {
   selectedModel: 'claude-3-7-sonnet',
   availableModels: [],
   providerMode: 'unknown',
+  isLoadingModels: false,
   systemPrompt: DEFAULT_SYSTEM_PROMPT,
   temperature: 0.7,
   pendingAttachments: [],
@@ -115,23 +116,34 @@ export const useFridayStore = create((set, get) => ({
   },
 
   fetchModels: async () => {
+    set({ isLoadingModels: true });
     try {
       const res = await apiFetch('/v1/friday/models', { method: 'GET' });
       const payload = await safeParseJson(res);
-      if (!res.ok || !Array.isArray(payload?.data?.models)) {
-        set({ availableModels: [], providerMode: 'unavailable' });
+      if (!res.ok) {
+        const providerMode = res.status === 401
+          ? 'auth_required'
+          : res.status === 403
+            ? 'forbidden'
+            : 'unavailable';
+        set({ availableModels: [], providerMode, isLoadingModels: false });
+        return;
+      }
+      if (!Array.isArray(payload?.data?.models)) {
+        set({ availableModels: [], providerMode: 'unavailable', isLoadingModels: false });
         return;
       }
       const models = payload.data.models;
       set((state) => ({
         availableModels: models,
         providerMode: payload.data.provider_mode || 'unknown',
+        isLoadingModels: false,
         ...(models.length && !models.some((model) => model.id === state.selectedModel)
           ? { selectedModel: models[0].id }
           : {})
       }));
     } catch {
-      set({ availableModels: [], providerMode: 'unavailable' });
+      set({ availableModels: [], providerMode: 'unavailable', isLoadingModels: false });
     }
   },
 

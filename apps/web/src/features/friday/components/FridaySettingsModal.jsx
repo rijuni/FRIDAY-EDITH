@@ -1,5 +1,5 @@
 import React, { useEffect, useState } from 'react';
-import { X, Settings, User, Sliders, Shield, CheckCircle2, AlertCircle, LogOut, Loader2 } from 'lucide-react';
+import { X, Settings, User, Sliders, Shield, CheckCircle2, AlertCircle, LogOut, Loader2, RefreshCw } from 'lucide-react';
 import { apiFetch, safeParseJson } from '../../../lib/apiClient.js';
 import { useAuthStore } from '../../../stores/authStore.js';
 import { useFridayStore } from '../../../stores/fridayStore.js';
@@ -8,7 +8,7 @@ const DEFAULT_SYSTEM_PROMPT = 'You are F.R.I.D.A.Y., a high-intelligence AI assi
 
 export function FridaySettingsModal({ isOpen, onClose }) {
   const { user, setUser } = useAuthStore();
-  const { selectedModel, availableModels, providerMode, systemPrompt, temperature, setPreferences } = useFridayStore();
+  const { selectedModel, availableModels, providerMode, isLoadingModels, fetchModels, systemPrompt, temperature, setPreferences } = useFridayStore();
 
   const [displayName, setDisplayName] = useState(user?.name || '');
   const [modelChoice, setModelChoice] = useState(selectedModel || 'claude-3-7-sonnet');
@@ -28,6 +28,10 @@ export function FridaySettingsModal({ isOpen, onClose }) {
     setStatusMsg(null);
     setErrorMsg(null);
   }, [isOpen, user?.name, selectedModel, systemPrompt, temperature]);
+
+  useEffect(() => {
+    if (isOpen) fetchModels();
+  }, [isOpen, fetchModels]);
 
   useEffect(() => {
     if (!isOpen) return undefined;
@@ -207,9 +211,26 @@ export function FridaySettingsModal({ isOpen, onClose }) {
                   {availableModels.length ? availableModels.map((model) => (
                     <option key={model.id} value={model.id} className="bg-[#120d24]">{model.label}</option>
                   )) : <option value={modelChoice} disabled className="bg-[#120d24]">
-                    {providerMode === 'unavailable' ? 'AI service unavailable' : 'No provider configured'}
+                    {providerMode === 'auth_required'
+                      ? 'Sign in again to load models'
+                      : providerMode === 'forbidden'
+                        ? 'AI models are not available for this account'
+                        : providerMode === 'unavailable'
+                          ? 'AI service unavailable'
+                          : 'No provider configured'}
                   </option>}
                 </select>
+                {!availableModels.length && (
+                  <button
+                    type="button"
+                    onClick={fetchModels}
+                    disabled={isLoadingModels}
+                    className="mt-2 inline-flex items-center gap-1 text-[10px] text-purple-200 hover:text-white disabled:opacity-50"
+                  >
+                    {isLoadingModels ? <Loader2 className="h-3 w-3 animate-spin" /> : <RefreshCw className="h-3 w-3" />}
+                    {isLoadingModels ? 'Checking…' : 'Retry model connection'}
+                  </button>
+                )}
               </div>
 
               <div>

@@ -3,7 +3,7 @@ import helmet from 'helmet';
 import cors from 'cors';
 import { config } from './config/index.js';
 import { requestIdMiddleware } from './middleware/requestId.js';
-import { validateOrigin } from './middleware/validateOrigin.js';
+import { isAllowedOrigin, validateOrigin } from './middleware/validateOrigin.js';
 import { apiLimiter } from './middleware/rateLimit.js';
 import { errorHandler } from './middleware/errorHandler.js';
 import { healthRouter } from './routes/v1/health.routes.js';
@@ -18,7 +18,13 @@ app.use(requestIdMiddleware);
 app.use(helmet());
 app.use(validateOrigin);
 app.use(cors({
-  origin: config.ALLOWED_ORIGINS.length === 1 ? config.ALLOWED_ORIGINS[0] : config.ALLOWED_ORIGINS,
+  origin: (origin, callback) => {
+    if (!origin || isAllowedOrigin(origin)) {
+      callback(null, true);
+    } else {
+      callback(null, false);
+    }
+  },
   credentials: true,
   methods: ['GET', 'POST', 'PATCH', 'DELETE', 'OPTIONS'],
   allowedHeaders: ['Content-Type', 'Authorization', 'X-CSRF-Token', 'X-Request-Id']

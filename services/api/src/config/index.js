@@ -6,7 +6,7 @@ import { fileURLToPath } from 'url';
 const __filename = fileURLToPath(import.meta.url);
 const __dirname = path.dirname(__filename);
 
-// Load root .env if available, or services/api .env
+// Loaded root .env and services/api .env
 dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config();
 
@@ -66,9 +66,16 @@ if (parsed.data.NODE_ENV === 'production') {
   }
 }
 
+const configuredOrigins = parsed.data.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean);
+if (parsed.data.NODE_ENV !== 'production') {
+  if (configuredOrigins.includes('http://localhost:5173') && !configuredOrigins.includes('http://127.0.0.1:5173')) {
+    configuredOrigins.push('http://127.0.0.1:5173');
+  }
+}
+
 export const config = {
   ...parsed.data,
   COOKIE_SECURE: parsed.data.COOKIE_SECURE ?? parsed.data.NODE_ENV === 'production',
-  ALLOWED_ORIGINS: parsed.data.CORS_ORIGIN.split(',').map((o) => o.trim()).filter(Boolean)
+  ALLOWED_ORIGINS: configuredOrigins
 };
 
