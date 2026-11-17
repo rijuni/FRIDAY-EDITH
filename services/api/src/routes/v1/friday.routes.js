@@ -23,7 +23,9 @@ const createConvSchema = {
 const listConvSchema = {
   query: z.object({
     limit: z.coerce.number().int().min(1).max(100).default(25),
-    offset: z.coerce.number().int().min(0).default(0)
+    offset: z.coerce.number().int().min(0).default(0),
+    search: z.string().trim().max(120).default(''),
+    archived: z.enum(['true', 'false']).default('false')
   })
 };
 
@@ -31,6 +33,15 @@ const convIdParamsSchema = {
   params: z.object({
     id: z.string().min(1).max(64)
   })
+};
+
+const updateConvSchema = {
+  params: convIdParamsSchema.params,
+  body: z.object({
+    title: z.string().trim().min(1).max(160).optional(),
+    isPinned: z.boolean().optional(),
+    isArchived: z.boolean().optional()
+  }).strict().refine((value) => Object.keys(value).length > 0)
 };
 
 const sendMessageSchema = {
@@ -46,6 +57,11 @@ const sendMessageSchema = {
       attachmentIds: z.array(z.string().min(1).max(64)).max(5).optional()
     })
     .strict()
+};
+
+const reviseMessageSchema = {
+  params: z.object({ id: z.string().min(1).max(64), messageId: z.string().min(1).max(64) }),
+  body: z.object({ content: z.string().trim().min(1).max(32000) }).strict()
 };
 
 const attachDocumentSchema = {
@@ -113,6 +129,7 @@ fridayRouter.post('/support', chatLimiter, validate(supportReportSchema), friday
 fridayRouter.post('/conversations', validate(createConvSchema), fridayController.createConversation);
 fridayRouter.get('/conversations', validate(listConvSchema), fridayController.listConversations);
 fridayRouter.get('/conversations/:id', validate(convIdParamsSchema), fridayController.getConversation);
+fridayRouter.patch('/conversations/:id', validate(updateConvSchema), fridayController.updateConversation);
 fridayRouter.delete('/conversations/:id', validate(convIdParamsSchema), fridayController.deleteConversation);
 fridayRouter.post(
   '/conversations/:id/attachments',
@@ -141,5 +158,10 @@ fridayRouter.post(
   chatLimiter,
   validate(sendMessageSchema),
   fridayController.sendMessage
+);
+fridayRouter.patch(
+  '/conversations/:id/messages/:messageId',
+  validate(reviseMessageSchema),
+  fridayController.reviseMessage
 );
 

@@ -2,10 +2,28 @@ import { create } from 'zustand';
 import { apiFetch, safeParseJson } from '../lib/apiClient.js';
 
 const DEFAULT_SYSTEM_PROMPT = 'You are F.R.I.D.A.Y., a high-intelligence AI assistant.';
+const LEGACY_MODEL_PROVIDERS = {
+  'claude-3-7-sonnet': 'Anthropic',
+  'gemini-2-flash': 'Gemini'
+};
+let modelRequestSequence = 0;
+let conversationFetchSequence = 0;
+
+function resolveAvailableModel(modelId, models) {
+  if (models.some((model) => model.id === modelId)) return modelId;
+  const legacyProvider = LEGACY_MODEL_PROVIDERS[modelId];
+  if (legacyProvider) {
+    const matchingProvider = models.find((model) => model.label?.startsWith(`${legacyProvider} ·`));
+    if (matchingProvider) return matchingProvider.id;
+  }
+  return models[0]?.id || modelId;
+}
 
 const INITIAL_STATE = {
   conversations: [],
   pagination: { total: 0, limit: 25, offset: 0, hasMore: false },
+  conversationSearch: '',
+  showArchivedConversations: false,
   activeConversationId: null,
   messages: [],
   selectedModel: 'claude-3-7-sonnet',
@@ -67,6 +85,8 @@ export const useFridayStore = create((set, get) => ({
     set({
       activeConversationId: null,
       messages: [],
+      conversationSearch: '',
+      showArchivedConversations: false,
       pendingAttachments: [],
       streamBuffer: '',
       isStreaming: false,
@@ -82,17 +102,32 @@ export const useFridayStore = create((set, get) => ({
     set({ ...INITIAL_STATE });
   },
 
-  fetchConversations: async ({ append = false } = {}) => {
+  fetchConversations: async (options = {}) => {
+    const append = options.append === true;
+    const current = get();
+    const search = typeof options.search === 'string' ? options.search : current.conversationSearch;
+    const archived = typeof options.archived === 'boolean' ? options.archived : current.showArchivedConversations;
+    const requestSequence = ++conversationFetchSequence;
+    set({
+      conversationSearch: search,
+      showArchivedConversations: archived,
+      isLoadingConversations: true
+    });
     const { pagination, conversations } = get();
     const limit = pagination.limit || 25;
     const offset = append ? conversations.length : 0;
-
-    set({ isLoadingConversations: true });
     try {
-      const res = await apiFetch(`/v1/friday/conversations?limit=${limit}&offset=${offset}`, {
+      const query = new URLSearchParams({
+        limit: String(limit),
+        offset: String(offset),
+        search,
+        archived: String(archived)
+      });
+      const res = await apiFetch(`/v1/friday/conversations?${query}`, {
         method: 'GET'
       });
       const payload = await safeParseJson(res);
+      if (requestSequence !== conversationFetchSequence) return;
       if (!res.ok || !payload?.data) {
         set({
           error: payload?.message || 'Unable to load conversation history.',
@@ -108,6 +143,7 @@ export const useFridayStore = create((set, get) => ({
         isLoadingConversations: false
       });
     } catch {
+      if (requestSequence !== conversationFetchSequence) return;
       set({
         error: 'Unable to reach F.R.I.D.A.Y. API to load conversations.',
         isLoadingConversations: false
@@ -116,10 +152,12 @@ export const useFridayStore = create((set, get) => ({
   },
 
   fetchModels: async () => {
+    const requestSequence = ++modelRequestSequence;
     set({ isLoadingModels: true });
     try {
       const res = await apiFetch('/v1/friday/models', { method: 'GET' });
       const payload = await safeParseJson(res);
+      if (requestSequence !== modelRequestSequence) return;
       if (!res.ok) {
         const providerMode = res.status === 401
           ? 'auth_required'
@@ -138,11 +176,10 @@ export const useFridayStore = create((set, get) => ({
         availableModels: models,
         providerMode: payload.data.provider_mode || 'unknown',
         isLoadingModels: false,
-        ...(models.length && !models.some((model) => model.id === state.selectedModel)
-          ? { selectedModel: models[0].id }
-          : {})
+        ...(models.length ? { selectedModel: resolveAvailableModel(state.selectedModel, models) } : {})
       }));
     } catch {
+      if (requestSequence !== modelRequestSequence) return;
       set({ availableModels: [], providerMode: 'unavailable', isLoadingModels: false });
     }
   },
@@ -194,7 +231,8 @@ export const useFridayStore = create((set, get) => ({
       set({
         activeConversationId: conv.id,
         messages: loadedMessages,
-        selectedModel: conv.modelPreference || get().selectedModel,
+        selectedModel: resolveAvailableModel(conv.modelPreference || get().selectedModel, get().availableModels),
+        systemPrompt: conv.systemPrompt || get().systemPrompt,
         isLoadingMessages: false
       });
     } catch {
@@ -224,8 +262,80 @@ export const useFridayStore = create((set, get) => ({
         conversations: updated,
         ...(activeConversationId === id ? { activeConversationId: null, messages: [] } : {})
       });
+      await get().fetchConversations();
     } catch {
       set({ error: 'Network error while deleting conversation.' });
+    }
+  },
+
+  updateConversation: async (id, updates) => {
+    if (!id) return null;
+    try {
+      const res = await apiFetch(`/v1/friday/conversations/${encodeURIComponent(id)}`, {
+        method: 'PATCH',
+        body: JSON.stringify(updates)
+      });
+      const payload = await safeParseJson(res);
+      if (!res.ok || !payload?.data?.conversation) {
+        set({ error: payload?.message || 'Failed to update conversation.' });
+        return null;
+      }
+
+      const updated = payload.data.conversation;
+      set((state) => {
+        const belongsInCurrentList = Boolean(updated.isArchived) === state.showArchivedConversations;
+        const conversations = (belongsInCurrentList
+          ? state.conversations.map((conversation) => conversation.id === id ? updated : conversation)
+          : state.conversations.filter((conversation) => conversation.id !== id))
+          .sort((left, right) => Number(right.isPinned) - Number(left.isPinned)
+            || new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+        return {
+          conversations,
+          ...(updated.isArchived && state.activeConversationId === id
+            ? { activeConversationId: null, messages: [] }
+            : {})
+        };
+      });
+      await get().fetchConversations();
+      return updated;
+    } catch {
+      set({ error: 'Network error while updating conversation.' });
+      return null;
+    }
+  },
+
+  exportConversation: async (id) => {
+    if (!id) return false;
+    try {
+      const res = await apiFetch(`/v1/friday/conversations/${encodeURIComponent(id)}`, { method: 'GET' });
+      const payload = await safeParseJson(res);
+      const conversation = payload?.data?.conversation;
+      if (!res.ok || !conversation) {
+        set({ error: payload?.message || 'Failed to export conversation.' });
+        return false;
+      }
+
+      const transcript = [
+        `# ${conversation.title || 'Friday conversation'}`,
+        '',
+        ...(conversation.messages || []).flatMap((message) => [
+          `## ${message.role === 'assistant' ? 'Friday' : 'You'}`,
+          '',
+          message.content || '',
+          ...(message.attachments || []).map((attachment) => `\n_Attachment: ${attachment.filename}_`),
+          ''
+        ])
+      ].join('\n');
+      const blobUrl = URL.createObjectURL(new Blob([transcript], { type: 'text/markdown;charset=utf-8' }));
+      const anchor = document.createElement('a');
+      anchor.href = blobUrl;
+      anchor.download = `${(conversation.title || 'friday-conversation').replace(/[<>:"/\\|?*\u0000-\u001f]/g, '_').slice(0, 100)}.md`;
+      anchor.click();
+      window.setTimeout(() => URL.revokeObjectURL(blobUrl), 1000);
+      return true;
+    } catch {
+      set({ error: 'Unable to export conversation.' });
+      return false;
     }
   },
 
@@ -233,13 +343,16 @@ export const useFridayStore = create((set, get) => ({
     const { activeAbortController, streamBuffer, messages } = get();
     activeAbortController?.abort();
     const partial = streamBuffer.trim();
+    const lastUserPrompt = [...messages].reverse().find((message) => message.role === 'user')?.content || null;
     set({
       messages: partial
-        ? [...messages, { id: `msg_cancelled_${Date.now()}`, role: 'assistant', content: `${partial} [Cancelled]` }]
+        ? [...messages, { id: `msg_cancelled_${Date.now()}`, role: 'assistant', content: `${partial} [Stopped]`, cancelled: true }]
         : messages,
       isStreaming: false,
       streamBuffer: '',
-      activeAbortController: null
+      activeAbortController: null,
+      lastFailedPrompt: lastUserPrompt,
+      error: lastUserPrompt ? 'Generation stopped. Retry to regenerate the response.' : null
     });
   },
 
@@ -258,6 +371,7 @@ export const useFridayStore = create((set, get) => ({
       lastFailedPrompt: null,
       isStreaming: true,
       streamBuffer: '',
+      isMockResponse: false,
       activeAbortController: abortController
     });
 
@@ -349,6 +463,7 @@ export const useFridayStore = create((set, get) => ({
       const decoder = new TextDecoder();
       let sseBuffer = '';
       let streamError = null;
+      let streamCompleted = false;
       let responseCitations = [];
 
       const processLines = (lines) => {
@@ -363,6 +478,7 @@ export const useFridayStore = create((set, get) => ({
             if (frame.event === 'citations' && Array.isArray(frame.metadata?.citations)) {
               responseCitations = frame.metadata.citations;
             }
+            if (frame.event === 'done') streamCompleted = true;
             if (frame.event === 'chunk' && typeof frame.text === 'string') {
               set((state) => ({ streamBuffer: state.streamBuffer + frame.text }));
             } else if (frame.event === 'error') {
@@ -389,6 +505,9 @@ export const useFridayStore = create((set, get) => ({
 
       if (streamError) {
         throw new Error(streamError);
+      }
+      if (!streamCompleted) {
+        throw new Error('Response stream ended before Friday completed the answer. You can retry this message.');
       }
 
       const finalContent = get().streamBuffer.trim();
@@ -429,7 +548,29 @@ export const useFridayStore = create((set, get) => ({
   retryLastMessage: async () => {
     const prompt = get().lastFailedPrompt;
     if (!prompt) return;
+    set((state) => ({
+      messages: state.messages.filter((message) => !message.cancelled),
+      error: null
+    }));
     await get().sendMessage(prompt);
+  },
+
+  reviseMessage: async (messageId, content) => {
+    const conversationId = get().activeConversationId;
+    if (!conversationId || !String(content || '').trim()) return false;
+    try {
+      const response = await apiFetch(
+        `/v1/friday/conversations/${encodeURIComponent(conversationId)}/messages/${encodeURIComponent(messageId)}`,
+        { method: 'PATCH', body: JSON.stringify({ content: String(content).trim() }) }
+      );
+      const payload = await safeParseJson(response);
+      if (!response.ok) throw new Error(payload?.message || 'Unable to edit this message.');
+      await get().selectConversation(conversationId);
+      return true;
+    } catch (err) {
+      set({ error: err?.message || 'Unable to edit this message.' });
+      return false;
+    }
   }
 }));
 

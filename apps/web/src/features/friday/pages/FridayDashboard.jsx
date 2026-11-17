@@ -21,6 +21,12 @@ import {
   PanelLeftClose,
   PanelLeftOpen,
   Trash2,
+  Search,
+  Pin,
+  Pencil,
+  Archive,
+  Download,
+  Copy,
   Square,
   RotateCcw,
   AlertCircle,
@@ -73,6 +79,8 @@ export function FridayDashboard() {
   const {
     conversations,
     pagination,
+    conversationSearch,
+    showArchivedConversations,
     activeConversationId,
     messages,
     selectedModel,
@@ -94,19 +102,29 @@ export function FridayDashboard() {
     fetchConversations,
     selectConversation,
     deleteConversation,
+    updateConversation,
+    exportConversation,
     cancelStreaming,
     sendMessage,
-    retryLastMessage
+    retryLastMessage,
+    reviseMessage
   } = useFridayStore();
 
   const [input, setInput] = useState('');
+  const [conversationSearchText, setConversationSearchText] = useState(conversationSearch);
+  const [actionsConversationId, setActionsConversationId] = useState(null);
   const [featureNotice, setFeatureNotice] = useState(null);
+  const [editingMessageId, setEditingMessageId] = useState(null);
+  const [editDraft, setEditDraft] = useState('');
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
 
   useEffect(() => {
-    fetchConversations();
-  }, [fetchConversations]);
+    const timer = window.setTimeout(() => {
+      fetchConversations({ search: conversationSearchText });
+    }, 250);
+    return () => window.clearTimeout(timer);
+  }, [conversationSearchText, fetchConversations]);
 
   useEffect(() => {
     useFridayStore.getState().fetchModels();
@@ -178,6 +196,17 @@ export function FridayDashboard() {
     }
     setFeatureNotice(null);
     await sendMessage(promptText);
+  };
+
+  const handleRevise = async (messageId) => {
+    const revisedText = editDraft.trim();
+    if (!revisedText || isStreaming) return;
+    const revised = await reviseMessage(messageId, revisedText);
+    if (!revised) return;
+    setEditingMessageId(null);
+    setEditDraft('');
+    setFeatureNotice(null);
+    await sendMessage(revisedText);
   };
 
   const quickCards = [
@@ -254,6 +283,9 @@ export function FridayDashboard() {
               type="button"
               onClick={() => {
                 newChat();
+                setConversationSearchText('');
+                fetchConversations({ search: '', archived: false });
+                setActionsConversationId(null);
                 setFeatureNotice(null);
               }}
               className="w-full flex items-center justify-center gap-2 py-2.5 px-4 rounded-xl bg-gradient-to-r from-purple-600 via-purple-500 to-indigo-600 hover:from-purple-500 hover:to-indigo-500 text-xs font-semibold text-white shadow-lg shadow-purple-600/30 border border-white/20 transition-all mb-6 cursor-pointer"
@@ -265,15 +297,42 @@ export function FridayDashboard() {
             {/* Recent Transcripts List */}
             <div className="flex-1 overflow-y-auto space-y-1 pr-1">
               <div className="flex items-center justify-between text-[11px] font-semibold text-slate-400 px-2 mb-2">
-                <span>Recent</span>
+                <span>{showArchivedConversations ? 'Archived' : 'Recent'}</span>
                 {isLoadingConversations && (
                   <Loader2 className="w-3 h-3 text-purple-300 animate-spin" aria-label="Loading conversations" />
                 )}
               </div>
 
+              <div className="flex gap-2 px-1 mb-3">
+                <div className="relative flex-1">
+                  <Search className="absolute left-2.5 top-2 w-3.5 h-3.5 text-slate-500" />
+                  <input
+                    type="search"
+                    value={conversationSearchText}
+                    onChange={(event) => setConversationSearchText(event.target.value)}
+                    aria-label="Search conversations"
+                    placeholder="Search conversations"
+                    className="w-full rounded-lg border border-white/10 bg-black/20 py-1.5 pl-8 pr-2 text-[11px] text-slate-100 placeholder:text-slate-500 focus:border-purple-400 focus:outline-none"
+                  />
+                </div>
+                <button
+                  type="button"
+                  onClick={() => fetchConversations({ search: conversationSearchText, archived: !showArchivedConversations })}
+                  aria-label={showArchivedConversations ? 'Show recent conversations' : 'Show archived conversations'}
+                  title={showArchivedConversations ? 'Show recent' : 'Show archived'}
+                  className="rounded-lg border border-white/10 px-2 text-[10px] text-slate-400 hover:text-white"
+                >
+                  {showArchivedConversations ? 'Recent' : 'Archive'}
+                </button>
+              </div>
+
               {conversations.length === 0 && !isLoadingConversations ? (
                 <p className="px-3 py-2 text-[11px] text-slate-500 italic">
-                  No saved conversations yet. Start a prompt below.
+                  {conversationSearchText
+                    ? 'No conversations match your search.'
+                    : showArchivedConversations
+                      ? 'No archived conversations.'
+                      : 'No saved conversations yet. Start a prompt below.'}
                 </p>
               ) : (
                 conversations.map((conv) => {
@@ -292,6 +351,7 @@ export function FridayDashboard() {
                         type="button"
                         onClick={() => {
                           setFeatureNotice(null);
+                          setActionsConversationId(null);
                           selectConversation(conv.id);
                         }}
                         className="flex-1 min-w-0 flex items-center gap-2.5 px-3 py-2 text-left text-xs truncate cursor-pointer"
@@ -301,17 +361,39 @@ export function FridayDashboard() {
                             isActive ? 'text-purple-300' : 'text-slate-400 group-hover:text-purple-300'
                           }`}
                         />
+                        {conv.isPinned && <Pin className="h-3 w-3 shrink-0 fill-current text-amber-300" aria-label="Pinned" />}
                         <span className="truncate">{conv.title || 'Untitled Conversation'}</span>
                       </button>
-                      <button
-                        type="button"
-                        onClick={() => deleteConversation(conv.id)}
-                        aria-label={`Delete ${conv.title || 'conversation'}`}
-                        title="Delete conversation"
-                        className="p-1.5 mr-1 rounded-lg text-slate-500 hover:text-red-300 hover:bg-red-500/15 opacity-0 group-hover:opacity-100 focus:opacity-100 transition-opacity cursor-pointer"
-                      >
-                        <Trash2 className="w-3.5 h-3.5" />
-                      </button>
+                      <div className="relative mr-1">
+                        <button
+                          type="button"
+                          onClick={() => setActionsConversationId((current) => current === conv.id ? null : conv.id)}
+                          aria-label={`Actions for ${conv.title || 'conversation'}`}
+                          aria-expanded={actionsConversationId === conv.id}
+                          className="rounded-lg p-1.5 text-slate-500 hover:bg-white/10 hover:text-white opacity-0 group-hover:opacity-100 focus:opacity-100"
+                        >
+                          <MoreHorizontal className="h-3.5 w-3.5" />
+                        </button>
+                        {actionsConversationId === conv.id && (
+                          <div className="absolute right-0 top-full z-30 mt-1 w-40 rounded-xl border border-white/15 bg-[#171224] p-1 shadow-xl">
+                            <button type="button" onClick={() => { updateConversation(conv.id, { isPinned: !conv.isPinned }); setActionsConversationId(null); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-slate-200 hover:bg-white/10">
+                              <Pin className="h-3.5 w-3.5" />{conv.isPinned ? 'Unpin' : 'Pin'}
+                            </button>
+                            <button type="button" onClick={() => { const title = window.prompt('Rename conversation', conv.title || ''); if (title?.trim()) updateConversation(conv.id, { title: title.trim() }); setActionsConversationId(null); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-slate-200 hover:bg-white/10">
+                              <Pencil className="h-3.5 w-3.5" />Rename
+                            </button>
+                            <button type="button" onClick={() => { exportConversation(conv.id); setActionsConversationId(null); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-slate-200 hover:bg-white/10">
+                              <Download className="h-3.5 w-3.5" />Export Markdown
+                            </button>
+                            <button type="button" onClick={() => { updateConversation(conv.id, { isArchived: !conv.isArchived }); setActionsConversationId(null); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-slate-200 hover:bg-white/10">
+                              <Archive className="h-3.5 w-3.5" />{conv.isArchived ? 'Restore' : 'Archive'}
+                            </button>
+                            <button type="button" onClick={() => { deleteConversation(conv.id); setActionsConversationId(null); }} className="flex w-full items-center gap-2 rounded-lg px-2.5 py-2 text-left text-[11px] text-red-300 hover:bg-red-500/15">
+                              <Trash2 className="h-3.5 w-3.5" />Delete permanently
+                            </button>
+                          </div>
+                        )}
+                      </div>
                     </div>
                   );
                 })
@@ -551,7 +633,56 @@ export function FridayDashboard() {
                               ))}
                             </div>
                           )}
-                          <div>{msg.content}</div>
+                          {editingMessageId === msg.id ? (
+                            <form
+                              onSubmit={(event) => { event.preventDefault(); handleRevise(msg.id); }}
+                              className="min-w-[min(70vw,24rem)] space-y-2"
+                            >
+                              <textarea
+                                autoFocus
+                                value={editDraft}
+                                onChange={(event) => setEditDraft(event.target.value)}
+                                maxLength={32000}
+                                aria-label="Edit your message"
+                                className="w-full min-h-24 rounded-lg bg-black/25 border border-purple-300/30 p-2 text-sm text-white focus:outline-none focus:ring-1 focus:ring-purple-400"
+                              />
+                              <div className="flex justify-end gap-2">
+                                <button type="button" onClick={() => { setEditingMessageId(null); setEditDraft(''); }} className="rounded px-2 py-1 text-xs text-slate-300 hover:bg-white/10">Cancel</button>
+                                <button type="submit" disabled={!editDraft.trim() || isStreaming} className="rounded bg-purple-600 px-2.5 py-1 text-xs text-white disabled:opacity-40">Save and resend</button>
+                              </div>
+                            </form>
+                          ) : (
+                            <div>{msg.content}</div>
+                          )}
+                          {msg.role === 'user' && msg.id === messages.filter((item) => item.role === 'user').at(-1)?.id && !isStreaming && editingMessageId !== msg.id && (
+                            <button
+                              type="button"
+                              onClick={() => { setEditingMessageId(msg.id); setEditDraft(msg.content); }}
+                              aria-label="Edit and resend your last message"
+                              title="Edit and resend"
+                              className="mt-2 inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-slate-300 hover:bg-white/10 hover:text-white"
+                            >
+                              <Pencil className="h-3 w-3" />Edit and resend
+                            </button>
+                          )}
+                          {msg.role === 'assistant' && (
+                            <button
+                              type="button"
+                              onClick={async () => {
+                                try {
+                                  await navigator.clipboard.writeText(msg.content || '');
+                                  setFeatureNotice('Response copied to clipboard.');
+                                } catch {
+                                  setFeatureNotice('Clipboard access is unavailable in this browser.');
+                                }
+                              }}
+                              aria-label="Copy Friday response"
+                              title="Copy response"
+                              className="mt-2 inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-slate-400 hover:bg-white/10 hover:text-white"
+                            >
+                              <Copy className="h-3 w-3" />Copy
+                            </button>
+                          )}
                           {msg.role === 'assistant' && Array.isArray(msg.citations) && msg.citations.length > 0 && (
                             <div className="mt-3 border-t border-white/10 pt-2 text-[10px] text-cyan-100/90" aria-label="Sources">
                               <div className="mb-1 font-semibold uppercase tracking-wide text-cyan-200">Sources</div>

@@ -75,7 +75,7 @@ export function FridaySettingsModal({ isOpen, onClose }) {
         temperature: Number(tempValue)
       });
 
-      setStatusMsg('Settings saved to your account and active workspace.');
+      setStatusMsg('Settings applied for this session. Model and system prompt are stored with a conversation after you send a message; temperature remains session-only.');
     } catch (err) {
       setErrorMsg(err?.message || 'Failed to save settings.');
     } finally {

@@ -44,7 +44,7 @@ function buildConversationTitle(content) {
 }
 
 function extractSseData(lines) {
-  const result = { text: '', citations: null, metadata: {} };
+  const result = { text: '', citations: null, metadata: {}, error: null, done: false };
   for (const line of lines) {
     const trimmed = line.replace(/\r$/, '');
     if (!trimmed.startsWith('data: ')) continue;
@@ -54,6 +54,10 @@ function extractSseData(lines) {
         result.text += parsed.text;
       } else if (parsed.event === 'citations' && Array.isArray(parsed.metadata?.citations)) {
         result.citations = parsed.metadata.citations;
+      } else if (parsed.event === 'error') {
+        result.error = parsed.message || 'The provider stream failed.';
+      } else if (parsed.event === 'done') {
+        result.done = true;
       }
       for (const key of ['is_mock', 'provider', 'total_tokens', 'prompt_tokens', 'completion_tokens']) {
         if (parsed.metadata?.[key] !== undefined) result.metadata[key] = parsed.metadata[key];
@@ -152,12 +156,17 @@ export async function listConversations(req, res, next) {
   try {
     const limit = Number(req.query?.limit ?? 25);
     const offset = Number(req.query?.offset ?? 0);
-    const where = { userId: req.user.id, isArchived: false };
+    const search = String(req.query?.search || '').trim();
+    const where = {
+      userId: req.user.id,
+      isArchived: req.query?.archived === 'true',
+      ...(search ? { title: { contains: search } } : {})
+    };
 
     const [conversations, total] = await prisma.$transaction([
       prisma.conversation.findMany({
         where,
-        orderBy: { updatedAt: 'desc' },
+        orderBy: [{ isPinned: 'desc' }, { updatedAt: 'desc' }],
         skip: offset,
         take: limit
       }),
@@ -176,6 +185,27 @@ export async function listConversations(req, res, next) {
         }
       }
     });
+  } catch (error) {
+    next(error);
+  }
+}
+
+export async function updateConversation(req, res, next) {
+  try {
+    const existing = await prisma.conversation.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, userId: true }
+    });
+    if (!existing) {
+      return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Conversation not found' });
+    }
+    assertOwnership(existing.userId, req.user);
+
+    const conversation = await prisma.conversation.update({
+      where: { id: existing.id },
+      data: req.body
+    });
+    res.status(200).json({ status: 'success', data: { conversation } });
   } catch (error) {
     next(error);
   }
@@ -558,6 +588,52 @@ export async function deleteConversation(req, res, next) {
   }
 }
 
+export async function reviseMessage(req, res, next) {
+  try {
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: req.params.id },
+      select: { id: true, userId: true }
+    });
+    if (!conversation) {
+      return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Conversation not found' });
+    }
+    assertOwnership(conversation.userId, req.user);
+
+    const revised = await prisma.$transaction(async (tx) => {
+      const messages = await tx.message.findMany({
+        where: { conversationId: conversation.id },
+        orderBy: [{ createdAt: 'asc' }, { id: 'asc' }],
+        select: { id: true, role: true }
+      });
+      const index = messages.findIndex((message) => message.id === req.params.messageId);
+      if (index < 0 || messages[index].role !== 'user') return null;
+      const following = messages.slice(index + 1);
+      // Editing a turn invalidates its assistant answer and later assistant-only continuation.
+      if (following.some((message) => message.role !== 'assistant')) {
+        const error = new Error('Only the latest user turn can be edited.');
+        error.statusCode = 409;
+        throw error;
+      }
+      if (following.length) {
+        await tx.message.deleteMany({ where: { id: { in: following.map((message) => message.id) } } });
+      }
+      const message = await tx.message.update({
+        where: { id: req.params.messageId },
+        data: { content: req.body.content }
+      });
+      await tx.conversation.update({ where: { id: conversation.id }, data: { updatedAt: new Date() } });
+      return message;
+    });
+
+    if (!revised) {
+      return res.status(404).json({ status: 'fail', statusCode: 404, message: 'User message not found' });
+    }
+    res.status(200).json({ status: 'success', data: { message: revised } });
+  } catch (error) {
+    next(error);
+  }
+}
+
 export async function sendMessage(req, res, next) {
   const abortController = new AbortController();
   const timeoutHandle = setTimeout(() => abortController.abort('timeout'), config.AI_STREAM_TIMEOUT_MS);
@@ -660,8 +736,8 @@ export async function sendMessage(req, res, next) {
       previousMessages.length === 0 &&
       (conversation.title === 'New F.R.I.D.A.Y. Session' || conversation.title === 'New Conversation');
 
-    if (!isPersistedRetry) {
-      await prisma.$transaction(async (tx) => {
+    await prisma.$transaction(async (tx) => {
+      if (!isPersistedRetry) {
         const userMessage = await tx.message.create({
           data: { conversationId, role: 'user', content }
         });
@@ -672,16 +748,18 @@ export async function sendMessage(req, res, next) {
             data: { messageId: userMessage.id }
           });
         }
+      }
 
-        await tx.conversation.update({
-          where: { id: conversationId },
-          data: {
-            ...(shouldRetitle ? { title: buildConversationTitle(content) } : {}),
-            updatedAt: new Date()
-          }
-        });
+      await tx.conversation.update({
+        where: { id: conversationId },
+        data: {
+          ...(shouldRetitle ? { title: buildConversationTitle(content) } : {}),
+          modelPreference: model || conversation.modelPreference || 'claude-3-7-sonnet',
+          systemPrompt: systemPrompt || conversation.systemPrompt || 'You are F.R.I.D.A.Y.',
+          updatedAt: new Date()
+        }
       });
-    }
+    });
 
     // 3. Assemble payload for authenticated Python Friday AI service (preserving within MAX_PROMPT_CHARS)
     const formatWithAttachments = (baseText, atts) => {
@@ -763,6 +841,8 @@ export async function sendMessage(req, res, next) {
 
     let fullAssistantResponse = '';
     let assistantMetadata = {};
+    let upstreamStreamError = null;
+    let upstreamStreamCompleted = false;
     let sseLineBuffer = '';
     const reader = aiResponse.body.getReader();
     const decoder = new TextDecoder();
@@ -781,6 +861,8 @@ export async function sendMessage(req, res, next) {
       sseLineBuffer = lines.pop() ?? '';
       const parsed = extractSseData(lines);
       fullAssistantResponse += parsed.text;
+      if (parsed.error) upstreamStreamError = parsed.error;
+      if (parsed.done) upstreamStreamCompleted = true;
       if (parsed.citations) assistantMetadata.citations = parsed.citations;
       Object.assign(assistantMetadata, parsed.metadata);
     }
@@ -788,13 +870,27 @@ export async function sendMessage(req, res, next) {
     if (sseLineBuffer) {
       const parsed = extractSseData([sseLineBuffer]);
       fullAssistantResponse += parsed.text;
+      if (parsed.error) upstreamStreamError = parsed.error;
+      if (parsed.done) upstreamStreamCompleted = true;
       if (parsed.citations) assistantMetadata.citations = parsed.citations;
       Object.assign(assistantMetadata, parsed.metadata);
     }
 
+    if (!upstreamStreamCompleted && !upstreamStreamError) {
+      upstreamStreamError = 'Response stream ended before Friday completed the answer.';
+      if (!res.writableEnded) {
+        const payload = JSON.stringify({
+          event: 'error',
+          errorCode: 'AI_STREAM_INTERRUPTED',
+          message: upstreamStreamError
+        });
+        res.write(`event: error\ndata: ${payload}\n\n`);
+      }
+    }
+
     // 6. Persist completed assistant message transactionally BEFORE closing SSE stream
     // so immediate follow-up fetches from the client see the committed assistant message.
-    if (fullAssistantResponse.trim()) {
+    if (fullAssistantResponse.trim() && !upstreamStreamError) {
       await prisma.$transaction([
         prisma.message.create({
           data: {
