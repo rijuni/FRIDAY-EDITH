@@ -27,6 +27,8 @@ import {
   Archive,
   Download,
   Copy,
+  Brain,
+  BookOpen,
   Square,
   RotateCcw,
   AlertCircle,
@@ -39,8 +41,10 @@ import { useAuthStore } from '../../../stores/authStore';
 import { NebulaOrb } from '../components/NebulaOrb';
 import { FridaySettingsModal } from '../components/FridaySettingsModal';
 import { FridayHelpModal } from '../components/FridayHelpModal';
+import { FridayMemoryModal } from '../components/FridayMemoryModal';
+import { FridayKnowledgeModal } from '../components/FridayKnowledgeModal';
 
-const MAX_ATTACHMENT_BYTES = 512 * 1024;
+const MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
 const EXTENSION_MIME_MAP = {
   '.txt': 'text/plain',
   '.md': 'text/markdown',
@@ -51,17 +55,6 @@ const EXTENSION_MIME_MAP = {
   '.docx': 'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
   '.xlsx': 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
 };
-const TEXT_EXTENSIONS = new Set(['.txt', '.md', '.markdown', '.csv', '.json']);
-
-function encodeBase64(bytes) {
-  let binary = '';
-  const blockSize = 0x8000;
-  for (let offset = 0; offset < bytes.length; offset += blockSize) {
-    binary += String.fromCharCode(...bytes.subarray(offset, offset + blockSize));
-  }
-  return btoa(binary);
-}
-
 function resolveAttachmentMime(filename, rawType) {
   const dotIdx = filename.lastIndexOf('.');
   const ext = dotIdx >= 0 ? filename.slice(dotIdx).toLowerCase() : '';
@@ -76,6 +69,8 @@ export function FridayDashboard() {
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [helpOpen, setHelpOpen] = useState(false);
+  const [memoryOpen, setMemoryOpen] = useState(false);
+  const [knowledgeOpen, setKnowledgeOpen] = useState(false);
   const {
     conversations,
     pagination,
@@ -94,6 +89,7 @@ export function FridayDashboard() {
     isLoadingMessages,
     isStreaming,
     streamBuffer,
+    uploadStatus,
     isMockResponse,
     error,
     lastFailedPrompt,
@@ -155,35 +151,18 @@ export function FridayDashboard() {
 
       if (file.size === 0 || file.size > MAX_ATTACHMENT_BYTES) {
         setFeatureNotice(
-          `"${file.name}" must be non-empty and under 512 KB for F.R.I.D.A.Y. chat ingestion.`
+          `"${file.name}" must be non-empty and no larger than 1 GB for F.R.I.D.A.Y. chat ingestion.`
         );
         continue;
       }
 
-      try {
-        const buffer = await file.arrayBuffer();
-        const bytes = new Uint8Array(buffer);
-        const dotIdx = file.name.lastIndexOf('.');
-        const extension = dotIdx >= 0 ? file.name.slice(dotIdx).toLowerCase() : '';
-        if (TEXT_EXTENSIONS.has(extension)) {
-          try {
-            new TextDecoder('utf-8', { fatal: true }).decode(bytes);
-          } catch {
-            setFeatureNotice(`"${file.name}" is not valid UTF-8 text.`);
-            continue;
-          }
-        }
-        addPendingAttachment({
-          tempId: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
-          filename: file.name,
-          mimeType,
-          sizeBytes: file.size,
-          content: encodeBase64(bytes),
-          encoding: 'base64'
-        });
-      } catch {
-        setFeatureNotice(`Unable to read "${file.name}".`);
-      }
+      addPendingAttachment({
+        tempId: `att_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`,
+        filename: file.name,
+        mimeType,
+        sizeBytes: file.size,
+        file
+      });
     }
   };
 
@@ -292,6 +271,23 @@ export function FridayDashboard() {
             >
               <Plus className="w-4 h-4 text-white" />
               <span>New Chat</span>
+            </button>
+
+            <button
+              type="button"
+              onClick={() => setMemoryOpen(true)}
+              className="mb-4 flex w-full items-center justify-center gap-2 rounded-xl border border-purple-300/20 bg-white/5 px-4 py-2 text-xs font-medium text-purple-100 transition-colors hover:bg-purple-500/15"
+            >
+              <Brain className="h-4 w-4" />
+              <span>Manage Memory</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setKnowledgeOpen(true)}
+              className="mb-4 -mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-cyan-300/20 bg-white/5 px-4 py-2 text-xs font-medium text-cyan-100 transition-colors hover:bg-cyan-500/15"
+            >
+              <BookOpen className="h-4 w-4" />
+              <span>Knowledge Bases</span>
             </button>
 
             {/* Recent Transcripts List */}
@@ -710,7 +706,7 @@ export function FridayDashboard() {
                           <Sparkles className="w-3.5 h-3.5" />
                         </div>
                         <div className="frosted-glass-card border-purple-400/50 rounded-2xl px-4 py-3 text-xs md:text-sm text-purple-200 max-w-xl whitespace-pre-wrap">
-                          <span>{streamBuffer || 'Synthesizing response...'}</span>
+                          <span>{uploadStatus || streamBuffer || 'Synthesizing response...'}</span>
                           <span className="inline-block w-1.5 h-3.5 ml-1 bg-purple-400 animate-pulse align-middle" />
                         </div>
                       </div>
@@ -818,7 +814,7 @@ export function FridayDashboard() {
                   onClick={() => fileInputRef.current?.click()}
                   aria-label="Attach File"
                   className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer disabled:opacity-40"
-                  title="Attach text, PDF, DOCX, or XLSX files (max 512 KB)"
+                  title="Attach text, PDF, DOCX, or XLSX files (up to 1 GB each)"
                 >
                   <Paperclip className="w-4 h-4" />
                 </button>
@@ -872,6 +868,8 @@ export function FridayDashboard() {
       </div>
 
       <FridaySettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
+      <FridayMemoryModal isOpen={memoryOpen} onClose={() => setMemoryOpen(false)} />
+      <FridayKnowledgeModal isOpen={knowledgeOpen} onClose={() => setKnowledgeOpen(false)} />
       <FridayHelpModal
         isOpen={helpOpen}
         onClose={() => setHelpOpen(false)}

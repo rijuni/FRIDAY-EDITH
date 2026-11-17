@@ -1,8 +1,15 @@
+import { Readable } from 'node:stream';
 import { prisma } from '../repositories/prisma.js';
 import { config } from '../config/index.js';
 import { assertOwnership } from '../middleware/authorize.js';
 import { auditService } from '../modules/audit/audit.service.js';
 import { logger } from '../utils/logger.js';
+
+const SUPPORTED_DOCUMENT_MIME_TYPES = new Set([
+  'text/plain', 'text/markdown', 'text/csv', 'application/json', 'application/pdf',
+  'application/vnd.openxmlformats-officedocument.wordprocessingml.document',
+  'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+]);
 
 function getFridayAiUrl() {
   return process.env.FRIDAY_AI_SERVICE_URL || config.FRIDAY_AI_SERVICE_URL;
@@ -115,6 +122,32 @@ async function parseUploadedText({ req, filename, mimeType, content, encoding = 
     throw error;
   }
   return data?.data || {};
+}
+
+async function parseStreamedDocument(req, { filename, mimeType, signal }) {
+  const internalUrl = new URL(`${getFridayAiUrl()}/v1/documents/parse-stream`);
+  internalUrl.searchParams.set('filename', filename);
+  const response = await fetch(internalUrl, {
+    method: 'PUT',
+    body: Readable.toWeb(req),
+    duplex: 'half',
+    signal,
+    headers: {
+      'Content-Type': 'application/octet-stream',
+      'X-File-Mime-Type': mimeType,
+      'X-Internal-Service-Token': config.INTERNAL_SERVICE_SECRET,
+      'X-User-Id': req.user.id,
+      'X-Request-Id': req.id || ''
+    }
+  });
+  const payload = await response.json().catch(() => null);
+  if (!response.ok || !payload?.data || payload.ownerUserId !== req.user.id) {
+    const error = new Error(payload?.message || 'Document validation and parsing failed.');
+    error.statusCode = response.status || 502;
+    error.errorCode = payload?.errorCode || 'DOCUMENT_PARSE_FAILED';
+    throw error;
+  }
+  return payload.data;
 }
 
 async function fetchFridayModels(req) {
@@ -375,6 +408,83 @@ export async function uploadAttachment(req, res, next) {
   }
 }
 
+export async function uploadAttachmentStream(req, res, next) {
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort('upload_timeout'), 2 * 60 * 60 * 1000);
+  const handleDisconnect = () => {
+    if (!res.writableEnded) abortController.abort('client_disconnect');
+  };
+  req.on('aborted', handleDisconnect);
+  res.on('close', handleDisconnect);
+  try {
+    const conversationId = req.params.id;
+    const conversation = await prisma.conversation.findUnique({
+      where: { id: conversationId },
+      select: { id: true, userId: true }
+    });
+    if (!conversation) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Conversation not found' });
+    assertOwnership(conversation.userId, req.user);
+
+    const filename = req.query.filename;
+    const mimeType = String(req.headers['x-file-mime-type'] || '').split(';', 1)[0].trim().toLowerCase();
+    if (!filename || !SUPPORTED_DOCUMENT_MIME_TYPES.has(mimeType)) {
+      return res.status(400).json({ status: 'fail', statusCode: 400, message: 'A supported filename and document MIME type are required.' });
+    }
+    const contentLength = Number(req.headers['content-length']);
+    if (Number.isFinite(contentLength) && contentLength > 1024 * 1024 * 1024) {
+      return res.status(413).json({ status: 'fail', statusCode: 413, message: 'Attachment exceeds the 1 GB upload limit.' });
+    }
+
+    const parsedData = await parseStreamedDocument(req, { filename, mimeType, signal: abortController.signal });
+    const parsedContent = Array.isArray(parsedData.chunks)
+      ? parsedData.chunks.map((chunk) => chunk.text || '').join('\n')
+      : '';
+    const attachment = await prisma.attachment.create({
+      data: {
+        conversationId,
+        filename: parsedData.filename || filename,
+        mimeType: parsedData.mime_type || mimeType,
+        sizeBytes: parsedData.total_bytes || Number(contentLength) || 0,
+        storagePath: 'parsed-text',
+        parsedContent
+      },
+      select: { id: true, conversationId: true, filename: true, mimeType: true, sizeBytes: true, createdAt: true }
+    });
+    await auditService.logEvent({
+      action: 'ATTACHMENT_UPLOADED', userId: req.user.id,
+      resourceType: 'ATTACHMENT', resourceId: attachment.id,
+      details: { conversationId, filename: attachment.filename, mimeType: attachment.mimeType, sizeBytes: attachment.sizeBytes, malwareScan: parsedData.malware_scan },
+      ip: req.ip
+    });
+    return res.status(201).json({
+      status: 'success',
+      data: { attachment: {
+        ...attachment,
+        chunkCount: parsedData.chunk_count ?? 1,
+        totalChars: parsedData.total_chars ?? parsedContent.length,
+        malwareScan: parsedData.malware_scan
+      } }
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError' && !res.writableEnded) {
+      const timedOut = abortController.signal.reason === 'upload_timeout';
+      if (!res.headersSent) return res.status(timedOut ? 504 : 499).json({
+        status: 'error', statusCode: timedOut ? 504 : 499,
+        message: timedOut ? 'Attachment upload timed out.' : 'Attachment upload was interrupted.'
+      });
+      return;
+    }
+    if (error?.statusCode && !res.headersSent) {
+      return res.status(error.statusCode).json({ status: 'error', statusCode: error.statusCode, errorCode: error.errorCode, message: error.message });
+    }
+    next(error);
+  } finally {
+    clearTimeout(timeoutHandle);
+    req.off('aborted', handleDisconnect);
+    res.off('close', handleDisconnect);
+  }
+}
+
 export async function listKnowledgeBases(req, res, next) {
   try {
     const knowledgeBases = await prisma.knowledgeBase.findMany({
@@ -466,6 +576,77 @@ export async function ingestKnowledgeDocument(req, res, next) {
       data: { document: { filename: parsed.filename, mimeType: parsed.mime_type, sizeBytes: fileSizeBytes, chunkCount: chunks.length, malwareScan: parsed.malware_scan } }
     });
   } catch (error) { next(error); }
+}
+
+export async function ingestKnowledgeDocumentStream(req, res, next) {
+  const abortController = new AbortController();
+  const timeoutHandle = setTimeout(() => abortController.abort('upload_timeout'), 2 * 60 * 60 * 1000);
+  const handleDisconnect = () => {
+    if (!res.writableEnded) abortController.abort('client_disconnect');
+  };
+  req.on('aborted', handleDisconnect);
+  res.on('close', handleDisconnect);
+  try {
+    const knowledgeBase = await prisma.knowledgeBase.findFirst({
+      where: { id: req.params.id, userId: req.user.id }, select: { id: true }
+    });
+    if (!knowledgeBase) return res.status(404).json({ status: 'fail', statusCode: 404, message: 'Knowledge base not found' });
+
+    const filename = req.query.filename;
+    const mimeType = String(req.headers['x-file-mime-type'] || '').split(';', 1)[0].trim().toLowerCase();
+    if (!filename || !mimeType || !SUPPORTED_DOCUMENT_MIME_TYPES.has(mimeType)) {
+      return res.status(400).json({ status: 'fail', statusCode: 400, message: 'A supported filename and document MIME type are required.' });
+    }
+    const contentLength = Number(req.headers['content-length']);
+    if (Number.isFinite(contentLength) && contentLength > 1024 * 1024 * 1024) {
+      return res.status(413).json({ status: 'fail', statusCode: 413, message: 'Document exceeds the 1 GB upload limit.' });
+    }
+
+    const parsed = await parseStreamedDocument(req, { filename, mimeType, signal: abortController.signal });
+    const chunks = (parsed.chunks || []).filter((item) => typeof item.text === 'string' && item.text.trim());
+    await prisma.$transaction(async (tx) => {
+      await tx.documentChunk.deleteMany({ where: { knowledgeBaseId: knowledgeBase.id, title: parsed.filename } });
+      if (chunks.length) {
+        await tx.documentChunk.createMany({
+          data: chunks.map((chunk) => ({
+            knowledgeBaseId: knowledgeBase.id,
+            title: parsed.filename,
+            content: chunk.text,
+            tokenCount: Math.max(1, Math.ceil(chunk.text.length / 4)),
+            chunkIndex: chunk.chunk_index,
+            metadata: JSON.stringify({ mimeType: parsed.mime_type, totalChars: parsed.total_chars })
+          }))
+        });
+      }
+    });
+    await auditService.logEvent({
+      action: 'KNOWLEDGE_DOCUMENT_INGESTED', userId: req.user.id,
+      resourceType: 'KNOWLEDGE_BASE', resourceId: knowledgeBase.id,
+      details: { filename: parsed.filename, chunkCount: chunks.length, sizeBytes: parsed.total_bytes, malwareScan: parsed.malware_scan },
+      ip: req.ip
+    });
+    res.status(201).json({
+      status: 'success',
+      data: { document: { filename: parsed.filename, mimeType: parsed.mime_type, sizeBytes: parsed.total_bytes, chunkCount: chunks.length, malwareScan: parsed.malware_scan } }
+    });
+  } catch (error) {
+    if (error?.name === 'AbortError' && !res.writableEnded) {
+      const timedOut = abortController.signal.reason === 'upload_timeout';
+      if (!res.headersSent) return res.status(timedOut ? 504 : 499).json({
+        status: 'error', statusCode: timedOut ? 504 : 499,
+        message: timedOut ? 'Document upload timed out.' : 'Document upload was interrupted.'
+      });
+      return;
+    }
+    if (error?.statusCode && !res.headersSent) {
+      return res.status(error.statusCode).json({ status: 'error', statusCode: error.statusCode, errorCode: error.errorCode, message: error.message });
+    }
+    next(error);
+  } finally {
+    clearTimeout(timeoutHandle);
+    req.off('aborted', handleDisconnect);
+    res.off('close', handleDisconnect);
+  }
 }
 
 export async function deleteKnowledgeDocument(req, res, next) {

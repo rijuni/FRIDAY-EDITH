@@ -39,15 +39,16 @@ class Settings(BaseSettings):
     MALWARE_SCAN_MODE: str = "off"
     CLAMD_HOST: str = "127.0.0.1"
     CLAMD_PORT: int = 3310
-    MALWARE_SCAN_TIMEOUT_SECONDS: float = 15.0
+    MALWARE_SCAN_TIMEOUT_SECONDS: float = 1800.0
 
     # Context, Payload & Ingestion limits
     MAX_CONTEXT_TOKENS: int = 128000
     MAX_PROMPT_CHARS: int = 32000
     MAX_MESSAGES_PER_REQUEST: int = 100
     MAX_JSON_BODY_BYTES: int = 1024 * 1024  # 1 MB
-    MAX_UPLOAD_SIZE_BYTES: int = 25 * 1024 * 1024  # 25 MB
-    DOCUMENT_PARSE_TIMEOUT_SECONDS: float = 10.0
+    MAX_BUFFERED_UPLOAD_SIZE_BYTES: int = 25 * 1024 * 1024  # Legacy multipart parser ceiling
+    MAX_UPLOAD_SIZE_BYTES: int = 1024 * 1024 * 1024  # 1 GiB
+    DOCUMENT_PARSE_TIMEOUT_SECONDS: float = 900.0
 
     model_config = SettingsConfigDict(
         env_file=Path(__file__).resolve().parents[4] / ".env",

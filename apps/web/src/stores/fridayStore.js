@@ -21,6 +21,8 @@ function resolveAvailableModel(modelId, models) {
 
 const INITIAL_STATE = {
   conversations: [],
+  memories: [],
+  isLoadingMemories: false,
   pagination: { total: 0, limit: 25, offset: 0, hasMore: false },
   conversationSearch: '',
   showArchivedConversations: false,
@@ -37,6 +39,7 @@ const INITIAL_STATE = {
   isLoadingMessages: false,
   isStreaming: false,
   streamBuffer: '',
+  uploadStatus: '',
   isMockResponse: false,
   error: null,
   lastFailedPrompt: null,
@@ -80,6 +83,50 @@ export const useFridayStore = create((set, get) => ({
 
   clearPendingAttachments: () => set({ pendingAttachments: [] }),
 
+  fetchMemories: async () => {
+    set({ isLoadingMemories: true });
+    try {
+      const response = await apiFetch('/v1/friday/memory');
+      const payload = await safeParseJson(response);
+      if (!response.ok) throw new Error(payload?.message || 'Unable to load saved memory.');
+      set({ memories: payload?.data?.memories || [], isLoadingMemories: false });
+      return true;
+    } catch (error) {
+      set({ isLoadingMemories: false, error: error?.message || 'Unable to load saved memory.' });
+      return false;
+    }
+  },
+
+  saveMemory: async ({ id, category, content }) => {
+    try {
+      const response = await apiFetch(id ? `/v1/friday/memory/${encodeURIComponent(id)}` : '/v1/friday/memory', {
+        method: id ? 'PATCH' : 'POST',
+        body: JSON.stringify({ category, content })
+      });
+      const payload = await safeParseJson(response);
+      if (!response.ok || !payload?.data?.memory) throw new Error(payload?.message || 'Unable to save memory.');
+      const memory = payload.data.memory;
+      set((state) => ({ memories: [memory, ...state.memories.filter((item) => item.id !== memory.id)] }));
+      return true;
+    } catch (error) {
+      set({ error: error?.message || 'Unable to save memory.' });
+      return false;
+    }
+  },
+
+  deleteMemory: async (id) => {
+    try {
+      const response = await apiFetch(`/v1/friday/memory/${encodeURIComponent(id)}`, { method: 'DELETE' });
+      const payload = await safeParseJson(response);
+      if (!response.ok) throw new Error(payload?.message || 'Unable to delete memory.');
+      set((state) => ({ memories: state.memories.filter((memory) => memory.id !== id) }));
+      return true;
+    } catch (error) {
+      set({ error: error?.message || 'Unable to delete memory.' });
+      return false;
+    }
+  },
+
   newChat: () => {
     get().activeAbortController?.abort();
     set({
@@ -89,6 +136,7 @@ export const useFridayStore = create((set, get) => ({
       showArchivedConversations: false,
       pendingAttachments: [],
       streamBuffer: '',
+      uploadStatus: '',
       isStreaming: false,
       isMockResponse: false,
       error: null,
@@ -194,6 +242,7 @@ export const useFridayStore = create((set, get) => ({
       isLoadingMessages: true,
       isStreaming: false,
       streamBuffer: '',
+      uploadStatus: '',
       error: null,
       activeAbortController: null,
       selectionNonce: nonce
@@ -350,6 +399,7 @@ export const useFridayStore = create((set, get) => ({
         : messages,
       isStreaming: false,
       streamBuffer: '',
+      uploadStatus: '',
       activeAbortController: null,
       lastFailedPrompt: lastUserPrompt,
       error: lastUserPrompt ? 'Generation stopped. Retry to regenerate the response.' : null
@@ -371,6 +421,7 @@ export const useFridayStore = create((set, get) => ({
       lastFailedPrompt: null,
       isStreaming: true,
       streamBuffer: '',
+      uploadStatus: '',
       isMockResponse: false,
       activeAbortController: abortController
     });
@@ -396,26 +447,29 @@ export const useFridayStore = create((set, get) => ({
 
       // 2. Upload any staged file attachments via API + Python document parser
       const uploadedAttachments = [];
-      for (const att of stagedAttachments) {
-        const uploadRes = await apiFetch(
-          `/v1/friday/conversations/${encodeURIComponent(convId)}/attachments`,
-          {
-            method: 'POST',
-            body: JSON.stringify({
-              filename: att.filename,
-              mimeType: att.mimeType,
-              content: att.content,
-              encoding: att.encoding || 'utf8'
-            }),
-            signal: abortController.signal
-          }
+      for (const [index, att] of stagedAttachments.entries()) {
+        set({ uploadStatus: `Uploading and scanning ${att.filename} (${index + 1}/${stagedAttachments.length})...` });
+        const uploadUrl = new URL(
+          `/v1/friday/conversations/${encodeURIComponent(convId)}/attachments/upload`,
+          window.location.origin
         );
+        uploadUrl.searchParams.set('filename', att.filename);
+        const uploadRes = await apiFetch(`${uploadUrl.pathname}${uploadUrl.search}`, {
+          method: 'POST',
+          headers: {
+            'Content-Type': 'application/octet-stream',
+            'X-File-Mime-Type': att.mimeType
+          },
+          body: att.file,
+          signal: abortController.signal
+        });
         const uploadPayload = await safeParseJson(uploadRes);
         if (!uploadRes.ok || !uploadPayload?.data?.attachment?.id) {
           throw new Error(uploadPayload?.message || `Failed to attach ${att.filename}.`);
         }
         uploadedAttachments.push(uploadPayload.data.attachment);
       }
+      set({ uploadStatus: stagedAttachments.length ? 'Preparing attached documents...' : '' });
 
       // 3. Append optimistic user message (with uploaded attachment chips)
       const userMsgId = `msg_user_${Date.now()}`;
@@ -458,6 +512,7 @@ export const useFridayStore = create((set, get) => ({
         const errPayload = await safeParseJson(streamRes);
         throw new Error(errPayload?.message || 'Failed to receive response from F.R.I.D.A.Y. service.');
       }
+      set({ uploadStatus: '' });
 
       const reader = streamRes.body.getReader();
       const decoder = new TextDecoder();
@@ -526,6 +581,7 @@ export const useFridayStore = create((set, get) => ({
           : state.messages,
         isStreaming: false,
         streamBuffer: '',
+        uploadStatus: '',
         activeAbortController: null
       }));
 
@@ -538,6 +594,7 @@ export const useFridayStore = create((set, get) => ({
       set({
         isStreaming: false,
         streamBuffer: '',
+        uploadStatus: '',
         activeAbortController: null,
         lastFailedPrompt: promptText,
         error: err?.message || 'Unable to send message. Verify API and AI services are running.'

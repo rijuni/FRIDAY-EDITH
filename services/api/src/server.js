@@ -8,6 +8,9 @@ const server = app.listen(config.PORT, config.HOST, () => {
   logger.info(`Environment: ${config.NODE_ENV}`);
 });
 
+// Large, streamed knowledge-base uploads can take longer than Node's 5 minute default.
+server.requestTimeout = 2 * 60 * 60 * 1000;
+
 // Graceful shutdown handling
 async function shutdown(signal) {
   logger.info(`${signal} signal received: closing HTTP server...`);

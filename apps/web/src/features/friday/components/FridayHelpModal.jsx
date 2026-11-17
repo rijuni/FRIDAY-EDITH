@@ -231,7 +231,7 @@ export function FridayHelpModal({ isOpen, onClose, onOpenEdith }) {
                 <span>File Attachments</span>
               </div>
               <p className="text-[11px] text-slate-400 leading-relaxed">
-                Click the paperclip icon to attach UTF-8 text files (<code>.txt</code>, <code>.md</code>, <code>.csv</code>, <code>.json</code> up to 512 KB). Attached documents are parsed by F.R.I.D.A.Y. AI and included in your conversation turn.
+                Click the paperclip icon to attach text, PDF, DOCX, or XLSX files (up to 1 GB each). F.R.I.D.A.Y. scans and parses each file, then includes bounded extracted text in the conversation turn.
               </p>
             </div>
 

@@ -77,6 +77,10 @@ const attachDocumentSchema = {
     })
     .strict()
 };
+const streamAttachmentSchema = {
+  params: z.object({ id: z.string().min(1).max(64) }),
+  query: z.object({ filename: z.string().trim().min(1).max(160) })
+};
 
 const supportReportSchema = {
   body: z
@@ -105,6 +109,10 @@ const ingestKnowledgeDocumentSchema = {
     content: z.string().min(1).max(699052, 'File exceeds 512 KB limit'),
     encoding: z.enum(['utf8', 'base64']).default('utf8')
   }).strict()
+};
+const streamKnowledgeDocumentSchema = {
+  params: z.object({ id: z.string().min(1).max(64) }),
+  query: z.object({ filename: z.string().trim().min(1).max(160) })
 };
 const deleteKnowledgeDocumentSchema = {
   params: z.object({ id: z.string().min(1).max(64) }),
@@ -137,6 +145,12 @@ fridayRouter.post(
   validate(attachDocumentSchema),
   fridayController.uploadAttachment
 );
+fridayRouter.post(
+  '/conversations/:id/attachments/upload',
+  chatLimiter,
+  validate(streamAttachmentSchema),
+  fridayController.uploadAttachmentStream
+);
 fridayRouter.get('/knowledge-bases', fridayController.listKnowledgeBases);
 fridayRouter.post('/knowledge-bases', validate(createKnowledgeBaseSchema), fridayController.createKnowledgeBase);
 fridayRouter.delete('/knowledge-bases/:id', validate(knowledgeBaseIdSchema), fridayController.deleteKnowledgeBase);
@@ -144,6 +158,10 @@ fridayRouter.get('/knowledge-bases/:id/documents', validate(knowledgeBaseIdSchem
 fridayRouter.post(
   '/knowledge-bases/:id/documents', chatLimiter,
   validate(ingestKnowledgeDocumentSchema), fridayController.ingestKnowledgeDocument
+);
+fridayRouter.post(
+  '/knowledge-bases/:id/documents/upload', chatLimiter,
+  validate(streamKnowledgeDocumentSchema), fridayController.ingestKnowledgeDocumentStream
 );
 fridayRouter.delete(
   '/knowledge-bases/:id/documents', validate(deleteKnowledgeDocumentSchema),

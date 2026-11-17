@@ -45,11 +45,12 @@ async def request_context_and_limits_middleware(request: Request, call_next):
     try:
         content_length = request.headers.get("content-length")
         if content_length and content_length.isdigit():
-            limit = (
-                settings.MAX_UPLOAD_SIZE_BYTES
-                if request.url.path.startswith("/v1/documents")
-                else settings.MAX_JSON_BODY_BYTES
-            )
+            if request.url.path.startswith("/v1/documents/parse-stream"):
+                limit = settings.MAX_UPLOAD_SIZE_BYTES
+            elif request.url.path.startswith("/v1/documents/"):
+                limit = settings.MAX_BUFFERED_UPLOAD_SIZE_BYTES
+            else:
+                limit = settings.MAX_JSON_BODY_BYTES
             if int(content_length) > limit:
                 return JSONResponse(
                     status_code=413,
