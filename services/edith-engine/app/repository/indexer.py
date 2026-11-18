@@ -1,6 +1,7 @@
 import ast
 import hashlib
 import os
+import re
 from pathlib import Path
 from typing import Any, Dict, List, Optional
 from pydantic import BaseModel, Field
@@ -39,6 +40,20 @@ class RepositoryIndexer:
         ".next",
         ".pytest_cache",
     }
+    SENSITIVE_DIRS = {".git", ".ssh", ".aws", ".azure", ".gnupg", ".kube", "credentials", "secrets"}
+    SENSITIVE_FILE_NAMES = {
+        ".netrc",
+        ".npmrc",
+        ".pypirc",
+        "credentials",
+        "credentials.json",
+        "terraform.tfstate",
+        "terraform.tfstate.backup",
+        "id_rsa",
+        "id_ed25519",
+        "id_ecdsa",
+    }
+    SENSITIVE_FILE_SUFFIXES = {".key", ".pem", ".p12", ".pfx", ".jks", ".keystore", ".tfstate"}
 
     def __init__(self, allowed_roots: Optional[List[str]] = None):
         self._explicit_allowed_roots = allowed_roots
@@ -70,7 +85,27 @@ class RepositoryIndexer:
             raise WorkspaceAccessDeniedException(
                 "Target file path escapes allowlisted workspace root."
             )
+        if self._is_sensitive_path(candidate.relative_to(resolved_root)):
+            raise WorkspaceAccessDeniedException(
+                "Credential and private-key files are not available to Edith."
+            )
         return resolved_root, candidate
+
+    @classmethod
+    def _is_sensitive_path(cls, relative_path: Path) -> bool:
+        parts = [part.lower() for part in relative_path.parts]
+        if any(part in cls.SENSITIVE_DIRS for part in parts[:-1]):
+            return True
+        name = parts[-1] if parts else ""
+        if name in cls.SENSITIVE_FILE_NAMES:
+            return True
+        if name.startswith(".env") or name.endswith((".env", ".secret", ".secrets")):
+            return True
+        if Path(name).suffix in cls.SENSITIVE_FILE_SUFFIXES:
+            return True
+        if "secret" in name or re.search(r"credential", name):
+            return True
+        return False
 
     def read_workspace_file(self, root_dir: Optional[str], relative_path: str) -> Dict[str, Any]:
         resolved_root, file_path = self.resolve_safe_file(root_dir, relative_path)
@@ -111,7 +146,9 @@ class RepositoryIndexer:
             dirnames[:] = sorted(
                 d
                 for d in dirnames
-                if d not in self.IGNORE_DIRS and not os.path.islink(os.path.join(dirpath, d))
+                if d.lower() not in self.IGNORE_DIRS
+                and d.lower() not in self.SENSITIVE_DIRS
+                and not os.path.islink(os.path.join(dirpath, d))
             )
 
             for fname in sorted(filenames):
@@ -131,6 +168,8 @@ class RepositoryIndexer:
                     continue
 
                 rel_path = os.path.relpath(str(real_file), str(resolved_root)).replace("\\", "/")
+                if self._is_sensitive_path(Path(rel_path)):
+                    continue
                 ext = os.path.splitext(fname)[1]
 
                 symbols: List[FileSymbol] = []

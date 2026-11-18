@@ -15,7 +15,8 @@ const createConvSchema = {
     .object({
       title: z.string().trim().min(1).max(160).optional(),
       modelPreference: z.string().trim().min(1).max(100).optional(),
-      systemPrompt: z.string().trim().max(8000).optional()
+      systemPrompt: z.string().trim().max(8000).optional(),
+      projectId: z.string().min(1).max(64).nullable().optional()
     })
     .strict()
 };
@@ -40,7 +41,8 @@ const updateConvSchema = {
   body: z.object({
     title: z.string().trim().min(1).max(160).optional(),
     isPinned: z.boolean().optional(),
-    isArchived: z.boolean().optional()
+    isArchived: z.boolean().optional(),
+    projectId: z.string().min(1).max(64).nullable().optional()
   }).strict().refine((value) => Object.keys(value).length > 0)
 };
 

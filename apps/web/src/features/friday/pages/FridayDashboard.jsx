@@ -5,6 +5,9 @@ import {
   Terminal,
   Paperclip,
   Mic,
+  MicOff,
+  Volume2,
+  VolumeX,
   Plus,
   MessageSquare,
   Settings,
@@ -77,6 +80,9 @@ export function FridayDashboard() {
     conversationSearch,
     showArchivedConversations,
     activeConversationId,
+    activeProjectId,
+    projects,
+    isLoadingProjects,
     messages,
     selectedModel,
     availableModels,
@@ -96,6 +102,8 @@ export function FridayDashboard() {
     clearError,
     newChat,
     fetchConversations,
+    fetchProjects,
+    setActiveProjectId,
     selectConversation,
     deleteConversation,
     updateConversation,
@@ -112,8 +120,13 @@ export function FridayDashboard() {
   const [featureNotice, setFeatureNotice] = useState(null);
   const [editingMessageId, setEditingMessageId] = useState(null);
   const [editDraft, setEditDraft] = useState('');
+  const [isListening, setIsListening] = useState(false);
+  const [speakingMessageId, setSpeakingMessageId] = useState(null);
   const messagesEndRef = useRef(null);
   const fileInputRef = useRef(null);
+  const speechRecognitionRef = useRef(null);
+  const voiceBaseInputRef = useRef('');
+  const speakingMessageRef = useRef(null);
 
   useEffect(() => {
     const timer = window.setTimeout(() => {
@@ -124,6 +137,12 @@ export function FridayDashboard() {
 
   useEffect(() => {
     useFridayStore.getState().fetchModels();
+    fetchProjects();
+  }, []);
+
+  useEffect(() => () => {
+    speechRecognitionRef.current?.abort?.();
+    window.speechSynthesis?.cancel?.();
   }, []);
 
   const scrollToBottom = () => {
@@ -173,8 +192,90 @@ export function FridayDashboard() {
     if (typeof directText !== 'string') {
       setInput('');
     }
+    speechRecognitionRef.current?.stop?.();
+    setIsListening(false);
     setFeatureNotice(null);
     await sendMessage(promptText);
+  };
+
+  const toggleVoiceCapture = () => {
+    if (speechRecognitionRef.current) {
+      speechRecognitionRef.current.stop();
+      return;
+    }
+    const Recognition = window.SpeechRecognition || window.webkitSpeechRecognition;
+    if (!Recognition) {
+      setFeatureNotice('Voice input is not supported in this browser. Try a browser with speech recognition enabled.');
+      return;
+    }
+    try {
+      const recognition = new Recognition();
+      recognition.continuous = false;
+      recognition.interimResults = false;
+      recognition.lang = navigator.language || 'en-US';
+      voiceBaseInputRef.current = input;
+      recognition.onresult = (event) => {
+        const transcript = Array.from(event.results || [])
+          .filter((result) => result.isFinal)
+          .map((result) => result[0]?.transcript || '')
+          .join(' ')
+          .trim();
+        if (transcript) setInput([voiceBaseInputRef.current.trim(), transcript].filter(Boolean).join(' '));
+      };
+      recognition.onerror = (event) => {
+        const message = event.error === 'not-allowed'
+          ? 'Microphone access was denied. Allow microphone access in browser settings.'
+          : event.error === 'no-speech'
+            ? 'No speech was detected. Try again.'
+            : 'Voice input ended unexpectedly.';
+        setFeatureNotice(message);
+        setIsListening(false);
+        speechRecognitionRef.current = null;
+      };
+      recognition.onend = () => {
+        setIsListening(false);
+        speechRecognitionRef.current = null;
+      };
+      speechRecognitionRef.current = recognition;
+      recognition.start();
+      setIsListening(true);
+      setFeatureNotice('Listening… your speech will be added to the message box for review.');
+    } catch {
+      speechRecognitionRef.current = null;
+      setIsListening(false);
+      setFeatureNotice('Unable to start voice input. Check microphone permissions and try again.');
+    }
+  };
+
+  const toggleSpeechOutput = (message) => {
+    if (!window.speechSynthesis || !window.SpeechSynthesisUtterance) {
+      setFeatureNotice('Speech output is not supported in this browser.');
+      return;
+    }
+    if (speakingMessageRef.current === message.id) {
+      window.speechSynthesis.cancel();
+      speakingMessageRef.current = null;
+      setSpeakingMessageId(null);
+      return;
+    }
+    window.speechSynthesis.cancel();
+    const utterance = new window.SpeechSynthesisUtterance(message.content || '');
+    utterance.onend = () => {
+      if (speakingMessageRef.current === message.id) {
+        speakingMessageRef.current = null;
+        setSpeakingMessageId(null);
+      }
+    };
+    utterance.onerror = () => {
+      if (speakingMessageRef.current === message.id) {
+        speakingMessageRef.current = null;
+        setSpeakingMessageId(null);
+        setFeatureNotice('Speech output stopped before the response finished.');
+      }
+    };
+    speakingMessageRef.current = message.id;
+    setSpeakingMessageId(message.id);
+    window.speechSynthesis.speak(utterance);
   };
 
   const handleRevise = async (messageId) => {
@@ -186,6 +287,15 @@ export function FridayDashboard() {
     setEditDraft('');
     setFeatureNotice(null);
     await sendMessage(revisedText);
+  };
+
+  const handleProjectChange = async (event) => {
+    const projectId = event.target.value || null;
+    if (activeConversationId) {
+      await updateConversation(activeConversationId, { projectId });
+    } else {
+      setActiveProjectId(projectId);
+    }
   };
 
   const quickCards = [
@@ -358,7 +468,10 @@ export function FridayDashboard() {
                           }`}
                         />
                         {conv.isPinned && <Pin className="h-3 w-3 shrink-0 fill-current text-amber-300" aria-label="Pinned" />}
-                        <span className="truncate">{conv.title || 'Untitled Conversation'}</span>
+                        <span className="min-w-0 flex-1 truncate" title={projects.find((project) => project.id === conv.projectId)?.name || conv.title || 'Untitled Conversation'}>
+                          {conv.title || 'Untitled Conversation'}
+                          {conv.projectId && <span className="ml-1 text-[9px] text-cyan-200/70">· {projects.find((project) => project.id === conv.projectId)?.name || 'project'}</span>}
+                        </span>
                       </button>
                       <div className="relative mr-1">
                         <button
@@ -450,7 +563,7 @@ export function FridayDashboard() {
                   <span>Nebula Pro System</span>
                 </div>
                 <p className="text-[10px] text-slate-400 leading-snug">
-                  AI provider responses are labeled when running in mock mode. External providers are not connected yet.
+                  Friday uses the models configured by the server. Responses are marked when mock mode is active.
                 </p>
               </div>
             </div>
@@ -662,22 +775,35 @@ export function FridayDashboard() {
                             </button>
                           )}
                           {msg.role === 'assistant' && (
-                            <button
-                              type="button"
-                              onClick={async () => {
-                                try {
-                                  await navigator.clipboard.writeText(msg.content || '');
-                                  setFeatureNotice('Response copied to clipboard.');
-                                } catch {
-                                  setFeatureNotice('Clipboard access is unavailable in this browser.');
-                                }
-                              }}
-                              aria-label="Copy Friday response"
-                              title="Copy response"
-                              className="mt-2 inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-slate-400 hover:bg-white/10 hover:text-white"
-                            >
-                              <Copy className="h-3 w-3" />Copy
-                            </button>
+                            <div className="mt-2 flex items-center gap-1">
+                              <button
+                                type="button"
+                                onClick={() => toggleSpeechOutput(msg)}
+                                aria-label={speakingMessageId === msg.id ? 'Stop reading Friday response' : 'Read Friday response aloud'}
+                                aria-pressed={speakingMessageId === msg.id}
+                                title={speakingMessageId === msg.id ? 'Stop reading' : 'Read aloud'}
+                                className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-slate-400 hover:bg-white/10 hover:text-white"
+                              >
+                                {speakingMessageId === msg.id ? <VolumeX className="h-3 w-3" /> : <Volume2 className="h-3 w-3" />}
+                                {speakingMessageId === msg.id ? 'Stop' : 'Read aloud'}
+                              </button>
+                              <button
+                                type="button"
+                                onClick={async () => {
+                                  try {
+                                    await navigator.clipboard.writeText(msg.content || '');
+                                    setFeatureNotice('Response copied to clipboard.');
+                                  } catch {
+                                    setFeatureNotice('Clipboard access is unavailable in this browser.');
+                                  }
+                                }}
+                                aria-label="Copy Friday response"
+                                title="Copy response"
+                                className="inline-flex items-center gap-1 rounded px-1.5 py-1 text-[10px] text-slate-400 hover:bg-white/10 hover:text-white"
+                              >
+                                <Copy className="h-3 w-3" />Copy
+                              </button>
+                            </div>
                           )}
                           {msg.role === 'assistant' && Array.isArray(msg.citations) && msg.citations.length > 0 && (
                             <div className="mt-3 border-t border-white/10 pt-2 text-[10px] text-cyan-100/90" aria-label="Sources">
@@ -793,6 +919,22 @@ export function FridayDashboard() {
                 </div>
               )}
 
+              <div className="flex items-center justify-between gap-3 rounded-xl border border-white/10 bg-white/[0.03] px-3 py-2">
+                <span className="text-[11px] text-slate-400">Project context</span>
+                <select
+                  value={activeProjectId || ''}
+                  onChange={handleProjectChange}
+                  disabled={isStreaming || isLoadingMessages || isLoadingProjects}
+                  aria-label="Associate this conversation with an Edith project"
+                  className="max-w-[65%] truncate rounded-lg border border-cyan-300/15 bg-[#171224] px-2.5 py-1.5 text-[11px] text-cyan-100 disabled:opacity-50"
+                >
+                  <option value="">No project</option>
+                  {projects.map((project) => (
+                    <option key={project.id} value={project.id}>{project.name} · {project.defaultBranch}</option>
+                  ))}
+                </select>
+              </div>
+
               <form
                 onSubmit={(e) => {
                   e.preventDefault();
@@ -830,14 +972,13 @@ export function FridayDashboard() {
 
                 <button
                   type="button"
-                  onClick={() =>
-                    setFeatureNotice('Voice capture is not enabled in this browser build.')
-                  }
-                  aria-label="Voice Mode"
-                  className="p-2 text-slate-400 hover:text-white rounded-xl hover:bg-white/10 transition-colors cursor-pointer"
-                  title="Voice Mode"
+                  onClick={toggleVoiceCapture}
+                  aria-label={isListening ? 'Stop voice input' : 'Start voice input'}
+                  aria-pressed={isListening}
+                  className={`p-2 rounded-xl hover:bg-white/10 transition-colors cursor-pointer ${isListening ? 'text-red-300 bg-red-500/10' : 'text-slate-400 hover:text-white'}`}
+                  title={isListening ? 'Stop voice input' : 'Speak a message'}
                 >
-                  <Mic className="w-4 h-4" />
+                  {isListening ? <MicOff className="w-4 h-4" /> : <Mic className="w-4 h-4" />}
                 </button>
 
                 {isStreaming ? (

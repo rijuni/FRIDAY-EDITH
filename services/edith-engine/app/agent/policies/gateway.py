@@ -11,52 +11,27 @@ class PolicyDecision(BaseModel):
 
 
 def _contains_shell_chaining_or_redirection(cmd: str) -> bool:
-    """Detect shell operators, pipelines, redirection, or command substitution."""
-    if "\n" in cmd or "\r" in cmd or "\x00" in cmd:
+    """Conservatively catch operators across both PowerShell and POSIX shells.
+
+    Quoting and escaping rules differ between the shells supported by runner hosts.
+    Treat operators inside quotes as requiring approval too; false positives are safer
+    than a parser disagreement that classifies a chained command as safe.
+    """
+    if any(ch in cmd for ch in ("\n", "\r", "\x00", ";", "|", "&", ">", "<", "`")):
         return True
-
-    in_single_quote = False
-    in_double_quote = False
-    escaped = False
-    n = len(cmd)
-
-    for i, ch in enumerate(cmd):
-        if escaped:
-            escaped = False
-            continue
-        if ch == "\\" and not in_single_quote:
-            escaped = True
-            continue
-        if ch == "'" and not in_double_quote:
-            in_single_quote = not in_single_quote
-            continue
-        if ch == '"' and not in_single_quote:
-            in_double_quote = not in_double_quote
-            continue
-
-        # Backticks and $(...) execute inside double-quoted strings in POSIX/PowerShell
-        if not in_single_quote:
-            if ch == "`":
-                return True
-            if ch == "$" and i + 1 < n and cmd[i + 1] == "(":
-                return True
-
-        if not in_single_quote and not in_double_quote:
-            if ch in (";", "|", "&", ">", "<"):
-                return True
-
-    return False
+    return "$(" in cmd
 
 
 class CommandPolicyGateway:
     """Enforces zero-trust command classification for E.D.I.T.H. execution."""
 
     SAFE_PATTERNS = [
-        r"^(git\s+(status|diff|log|branch|show))(\s+.*)?$",
+        r"^git\s+status(?:\s+(?:--short|--porcelain|--branch|-sb))*$",
+        r"^git\s+diff(?:\s+--stat)?$",
+        r"^git\s+log(?:\s+--oneline)?$",
+        r"^git\s+branch(?:\s+--list)?$",
         r"^(dir|ls|pwd|echo)(\s+.*)?$",
         r"^(node|python|npm|pytest)\s+(--version|-v|-V)$",
-        r"^(npm\s+(test|run\s+test|run\s+build|run\s+lint))(\s+.*)?$",
-        r"^(pytest)(\s+.*)?$",
     ]
 
     DENIED_PATTERNS = [
@@ -65,7 +40,7 @@ class CommandPolicyGateway:
         r"(format\s+[c-zC-Z]:)",
         r"(\bdiskpart\b|\bbcdedit\b|\breg\s+delete\b)",
         r"(sudo\s+rm\s+-[rRfF]+)",
-        r"(rm\s+-[rRfF]{1,4}\s+(/|~|\*|\.\.)(\s|$))",
+        r"(rm\s+-[rRfF]{1,4}\s+(?:--\s+)?['\"]?(?:[c-zC-Z]:\\|/|~|\*|\.\.)(?:[^'\"\s]*)['\"]?(?=\s|$))",
         r"(\bmkfs\b|\bdd\s+if=)",
         r"(:\(\)\s*\{\s*:\s*\|\s*:\s*&\s*\}\s*;\s*:)",
         r"((curl|wget|irm|iwr)\s+.*\|\s*(bash|sh|zsh|pwsh|powershell|iex))",
@@ -79,6 +54,8 @@ class CommandPolicyGateway:
 
     CONFIRMATION_PATTERNS = [
         r"^(git\s+(commit|push|rebase|reset|checkout|clean|merge|pull))(\s+.*)?$",
+        r"^(npm\s+(test|run\s+(test|build|lint)))(\s+.*)?$",
+        r"^(pytest)(\s+.*)?$",
         r"^(npm\s+(install|i|uninstall|update|ci))(\s+.*)?$",
         r"^(pip\s+(install|uninstall))(\s+.*)?$",
         r"^(del|rm|rmdir|remove-item|move-item|mv|cp|copy-item)(\s+.*)?$",

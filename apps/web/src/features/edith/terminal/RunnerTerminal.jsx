@@ -36,7 +36,7 @@ export function RunnerTerminal({
   }, []);
 
   const executeCommand = useCallback(
-    async (term, cmd, { approved = false } = {}) => {
+    async (term, cmd, { approvalId = null } = {}) => {
       const cleanCmd = (cmd || '').trim();
       if (!cleanCmd) {
         writePrompt(term);
@@ -60,14 +60,14 @@ export function RunnerTerminal({
 
       try {
         term.writeln(
-          approved
-            ? `\x1b[33m[authorized execution]: $ ${cleanCmd}\x1b[0m`
+          approvalId
+            ? `\x1b[33m[approved execution]: $ ${cleanCmd}\x1b[0m`
             : '\x1b[90m[checking policy & executing in runner boundary]...\x1b[0m'
         );
 
         const res = await apiFetch('/v1/edith/execute', {
           method: 'POST',
-          body: JSON.stringify({ command: cleanCmd, approved })
+          body: JSON.stringify({ command: cleanCmd, ...(approvalId ? { approval_id: approvalId } : {}) })
         });
         const data = await safeParseJson(res);
 
@@ -75,7 +75,7 @@ export function RunnerTerminal({
           term.writeln(
             `\x1b[33m[POLICY GATE // APPROVAL REQUIRED]: ${data.message || 'Explicit confirmation required.'}\x1b[0m`
           );
-          callbacksRef.current.onApprovalRequired?.(cleanCmd, data.policy || null);
+          callbacksRef.current.onApprovalRequired?.(cleanCmd, data.policy || null, data.data?.approvalId || null);
           return;
         }
 
@@ -208,10 +208,10 @@ export function RunnerTerminal({
   useEffect(() => {
     if (!pendingCommand?.command || !xtermInstance.current) return;
     const term = xtermInstance.current;
-    const { command, approved = false } = pendingCommand;
+    const { command, approvalId = null } = pendingCommand;
     onPendingCommandHandled?.();
     term.writeln(`\x1b[90m[dispatched]: $ ${command}\x1b[0m`);
-    executeCommand(term, command, { approved });
+    executeCommand(term, command, { approvalId });
   }, [pendingCommand, executeCommand, onPendingCommandHandled]);
 
   return (

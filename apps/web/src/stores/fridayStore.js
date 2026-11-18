@@ -21,12 +21,15 @@ function resolveAvailableModel(modelId, models) {
 
 const INITIAL_STATE = {
   conversations: [],
+  projects: [],
+  isLoadingProjects: false,
   memories: [],
   isLoadingMemories: false,
   pagination: { total: 0, limit: 25, offset: 0, hasMore: false },
   conversationSearch: '',
   showArchivedConversations: false,
   activeConversationId: null,
+  activeProjectId: null,
   messages: [],
   selectedModel: 'claude-3-7-sonnet',
   availableModels: [],
@@ -51,6 +54,7 @@ export const useFridayStore = create((set, get) => ({
   ...INITIAL_STATE,
 
   setModel: (model) => set({ selectedModel: model }),
+  setActiveProjectId: (activeProjectId) => set({ activeProjectId: activeProjectId || null }),
   setPreferences: ({ selectedModel, systemPrompt, temperature }) =>
     set((state) => ({
       selectedModel: selectedModel || state.selectedModel,
@@ -82,6 +86,20 @@ export const useFridayStore = create((set, get) => ({
     })),
 
   clearPendingAttachments: () => set({ pendingAttachments: [] }),
+
+  fetchProjects: async () => {
+    set({ isLoadingProjects: true });
+    try {
+      const response = await apiFetch('/v1/edith/projects');
+      const payload = await safeParseJson(response);
+      if (!response.ok) throw new Error(payload?.message || 'Unable to load Edith workspaces.');
+      set({ projects: payload?.data?.projects || [], isLoadingProjects: false });
+      return true;
+    } catch (error) {
+      set({ error: error?.message || 'Unable to load Edith workspaces.', isLoadingProjects: false });
+      return false;
+    }
+  },
 
   fetchMemories: async () => {
     set({ isLoadingMemories: true });
@@ -131,6 +149,7 @@ export const useFridayStore = create((set, get) => ({
     get().activeAbortController?.abort();
     set({
       activeConversationId: null,
+      activeProjectId: null,
       messages: [],
       conversationSearch: '',
       showArchivedConversations: false,
@@ -239,6 +258,7 @@ export const useFridayStore = create((set, get) => ({
 
     set({
       activeConversationId: id,
+      activeProjectId: null,
       isLoadingMessages: true,
       isStreaming: false,
       streamBuffer: '',
@@ -279,6 +299,7 @@ export const useFridayStore = create((set, get) => ({
       });
       set({
         activeConversationId: conv.id,
+        activeProjectId: conv.projectId || null,
         messages: loadedMessages,
         selectedModel: resolveAvailableModel(conv.modelPreference || get().selectedModel, get().availableModels),
         systemPrompt: conv.systemPrompt || get().systemPrompt,
@@ -309,7 +330,7 @@ export const useFridayStore = create((set, get) => ({
       const updated = conversations.filter((c) => c.id !== id);
       set({
         conversations: updated,
-        ...(activeConversationId === id ? { activeConversationId: null, messages: [] } : {})
+        ...(activeConversationId === id ? { activeConversationId: null, activeProjectId: null, messages: [] } : {})
       });
       await get().fetchConversations();
     } catch {
@@ -341,7 +362,10 @@ export const useFridayStore = create((set, get) => ({
         return {
           conversations,
           ...(updated.isArchived && state.activeConversationId === id
-            ? { activeConversationId: null, messages: [] }
+            ? { activeConversationId: null, activeProjectId: null, messages: [] }
+            : {}),
+          ...(state.activeConversationId === id && !updated.isArchived
+            ? { activeProjectId: updated.projectId || null }
             : {})
         };
       });
@@ -431,7 +455,7 @@ export const useFridayStore = create((set, get) => ({
       if (!convId) {
         const createRes = await apiFetch('/v1/friday/conversations', {
           method: 'POST',
-          body: JSON.stringify({ modelPreference: selectedModel, systemPrompt }),
+          body: JSON.stringify({ modelPreference: selectedModel, systemPrompt, projectId: get().activeProjectId }),
           signal: abortController.signal
         });
         const createPayload = await safeParseJson(createRes);

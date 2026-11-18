@@ -105,7 +105,8 @@ export function EdithWorkspace() {
     command: '',
     decision: 'CONFIRMATION_REQUIRED',
     reason: '',
-    riskScore: 0
+    riskScore: 0,
+    approvalId: null
   });
   const [isCheckingPolicy, setIsCheckingPolicy] = useState(false);
   const [policyProbeCmd, setPolicyProbeCmd] = useState('npm install @testing-library/react');
@@ -358,12 +359,48 @@ export function EdithWorkspace() {
     }
   };
 
-  const handleAuthorizeCommand = () => {
+  const handleAuthorizeCommand = async () => {
     const cmd = approvalState.command;
-    setApprovalState((prev) => ({ ...prev, isOpen: false }));
     if (!cmd) return;
+    if (approvalState.approvalId) {
+      setIsCheckingPolicy(true);
+      try {
+        const res = await apiFetch(`/v1/edith/approvals/${encodeURIComponent(approvalState.approvalId)}`, {
+          method: 'PATCH',
+          body: JSON.stringify({ status: 'APPROVED' })
+        });
+        const data = await safeParseJson(res);
+        if (!res.ok) throw new Error(data?.message || `Approval failed (HTTP ${res.status}).`);
+      } catch (err) {
+        setStatusBanner({ type: 'error', text: err?.message || 'Unable to approve command.' });
+        return;
+      } finally {
+        setIsCheckingPolicy(false);
+      }
+    }
+    setApprovalState((prev) => ({ ...prev, isOpen: false }));
     setBottomTab('terminal');
-    setPendingTerminalCmd({ command: cmd, approved: true, nonce: Date.now() });
+    setPendingTerminalCmd({
+      command: cmd,
+      approvalId: approvalState.approvalId,
+      nonce: Date.now()
+    });
+  };
+
+  const handleDenyCommand = async () => {
+    const approvalId = approvalState.approvalId;
+    setApprovalState((prev) => ({ ...prev, isOpen: false }));
+    if (!approvalId) return;
+    try {
+      const res = await apiFetch(`/v1/edith/approvals/${encodeURIComponent(approvalId)}`, {
+        method: 'PATCH',
+        body: JSON.stringify({ status: 'DENIED' })
+      });
+      const data = await safeParseJson(res);
+      if (!res.ok) throw new Error(data?.message || `Denial failed (HTTP ${res.status}).`);
+    } catch (err) {
+      setStatusBanner({ type: 'error', text: err?.message || 'Unable to record command denial.' });
+    }
   };
 
   const activeBufferCode = activeTab ? bufferContents[activeTab] ?? '' : '';
@@ -775,7 +812,7 @@ export function EdithWorkspace() {
                     pendingCommand={pendingTerminalCmd}
                     onPendingCommandHandled={() => setPendingTerminalCmd(null)}
                     onBusyChange={setIsTerminalBusy}
-                    onApprovalRequired={(cmd, policy) => {
+                    onApprovalRequired={(cmd, policy, approvalId) => {
                       setApprovalState({
                         isOpen: true,
                         command: cmd,
@@ -783,7 +820,8 @@ export function EdithWorkspace() {
                         reason:
                           policy?.reason ||
                           'Command requires explicit developer confirmation before execution.',
-                        riskScore: policy?.risk_score ?? 65
+                        riskScore: policy?.risk_score ?? 65,
+                        approvalId
                       });
                     }}
                   />
@@ -919,9 +957,9 @@ export function EdithWorkspace() {
         decision={approvalState.decision}
         reason={approvalState.reason}
         riskScore={approvalState.riskScore}
-        isSubmitting={isTerminalBusy}
+        isSubmitting={isTerminalBusy || isCheckingPolicy}
         onApprove={handleAuthorizeCommand}
-        onDeny={() => setApprovalState((prev) => ({ ...prev, isOpen: false }))}
+        onDeny={handleDenyCommand}
       />
     </div>
   );

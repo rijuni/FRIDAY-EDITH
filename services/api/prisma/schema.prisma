@@ -15,14 +15,14 @@ datasource db {
 }
 
 model User {
-  id           String        @id @default(cuid())
-  email        String        @unique
+  id           String   @id @default(cuid())
+  email        String   @unique
   name         String?
-  passwordHash String        @db.Text
-  role         String        @default("USER") // USER, DEVELOPER, ADMIN
-  isActive     Boolean       @default(true)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
+  passwordHash String   @db.Text
+  role         String   @default("USER") // USER, DEVELOPER, ADMIN
+  isActive     Boolean  @default(true)
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
 
   sessions       Session[]
   auditLogs      AuditLog[]
@@ -37,15 +37,15 @@ model User {
 }
 
 model Session {
-  id         String   @id @default(cuid())
-  userId     String
-  tokenHash  String   @unique
-  userAgent  String?  @db.Text
-  ipAddress  String?
-  expiresAt  DateTime
-  createdAt  DateTime @default(now())
+  id        String   @id @default(cuid())
+  userId    String
+  tokenHash String   @unique
+  userAgent String?  @db.Text
+  ipAddress String?
+  expiresAt DateTime
+  createdAt DateTime @default(now())
 
-  user       User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
 }
@@ -61,7 +61,7 @@ model AuditLog {
   ip           String?
   createdAt    DateTime @default(now())
 
-  user         User?    @relation(fields: [userId], references: [id], onDelete: SetNull)
+  user User? @relation(fields: [userId], references: [id], onDelete: SetNull)
 
   @@index([action])
   @@index([userId])
@@ -76,59 +76,61 @@ model ProviderKey {
   isDefault    Boolean  @default(false)
   createdAt    DateTime @default(now())
 
-  user         User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([userId, provider])
 }
 
 model Conversation {
-  id              String        @id @default(cuid())
-  title           String        @default("New Conversation")
+  id              String   @id @default(cuid())
+  title           String   @default("New Conversation")
   userId          String
   projectId       String?
-  isPinned        Boolean       @default(false)
-  isArchived      Boolean       @default(false)
+  isPinned        Boolean  @default(false)
+  isArchived      Boolean  @default(false)
   modelPreference String?
-  systemPrompt    String?       @db.LongText
-  createdAt       DateTime      @default(now())
-  updatedAt       DateTime      @updatedAt
+  systemPrompt    String?  @db.LongText
+  createdAt       DateTime @default(now())
+  updatedAt       DateTime @updatedAt
 
-  user            User          @relation(fields: [userId], references: [id], onDelete: Cascade)
-  messages        Message[]
-  attachments     Attachment[]
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  project     WorkspaceProject? @relation(fields: [projectId], references: [id], onDelete: SetNull)
+  messages    Message[]
+  attachments Attachment[]
 
   @@index([userId])
+  @@index([projectId])
   @@index([updatedAt])
 }
 
 model Message {
-  id               String       @id @default(cuid())
+  id               String   @id @default(cuid())
   conversationId   String
   role             String
-  content          String       @db.LongText
-  reasoningContent String?      @db.LongText
-  metadata         String?      @db.LongText
-  createdAt        DateTime     @default(now())
+  content          String   @db.LongText
+  reasoningContent String?  @db.LongText
+  metadata         String?  @db.LongText
+  createdAt        DateTime @default(now())
 
-  conversation     Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  attachments      Attachment[]
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  attachments  Attachment[]
 
   @@index([conversationId])
 }
 
 model Attachment {
-  id             String        @id @default(cuid())
+  id             String   @id @default(cuid())
   conversationId String
   messageId      String?
   filename       String
   mimeType       String
   sizeBytes      Int
-  storagePath    String        @db.Text
-  parsedContent  String?       @db.LongText
-  createdAt      DateTime      @default(now())
+  storagePath    String   @db.Text
+  parsedContent  String?  @db.LongText
+  createdAt      DateTime @default(now())
 
-  conversation   Conversation  @relation(fields: [conversationId], references: [id], onDelete: Cascade)
-  message        Message?      @relation(fields: [messageId], references: [id], onDelete: SetNull)
+  conversation Conversation @relation(fields: [conversationId], references: [id], onDelete: Cascade)
+  message      Message?     @relation(fields: [messageId], references: [id], onDelete: SetNull)
 
   @@index([conversationId])
 }
@@ -143,72 +145,73 @@ model MemoryItem {
   createdAt            DateTime @default(now())
   updatedAt            DateTime @updatedAt
 
-  user                 User     @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user User @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@index([userId])
   @@index([category])
 }
 
 model KnowledgeBase {
-  id          String          @id @default(cuid())
+  id          String   @id @default(cuid())
   userId      String
   name        String
-  description String?         @db.Text
-  createdAt   DateTime        @default(now())
+  description String?  @db.Text
+  createdAt   DateTime @default(now())
 
-  user        User            @relation(fields: [userId], references: [id], onDelete: Cascade)
-  chunks      DocumentChunk[]
+  user   User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  chunks DocumentChunk[]
 
   @@index([userId])
 }
 
 model DocumentChunk {
-  id              String        @id @default(cuid())
+  id              String   @id @default(cuid())
   knowledgeBaseId String
   title           String?
-  content         String        @db.LongText
-  tokenCount      Int           @default(0)
-  chunkIndex      Int           @default(0)
-  metadata        String?       @db.LongText
-  createdAt       DateTime      @default(now())
+  content         String   @db.LongText
+  tokenCount      Int      @default(0)
+  chunkIndex      Int      @default(0)
+  metadata        String?  @db.LongText
+  createdAt       DateTime @default(now())
 
-  knowledgeBase   KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
+  knowledgeBase KnowledgeBase @relation(fields: [knowledgeBaseId], references: [id], onDelete: Cascade)
 
   @@index([knowledgeBaseId])
 }
 
 model WorkspaceProject {
-  id            String      @id @default(cuid())
+  id            String   @id @default(cuid())
   userId        String
   name          String
-  repoUrl       String?     @db.Text
-  localPath     String      @db.Text
-  defaultBranch String      @default("main")
-  settings      String?     @db.LongText
-  createdAt     DateTime    @default(now())
-  updatedAt     DateTime    @updatedAt
+  repoUrl       String?  @db.Text
+  localPath     String   @db.Text
+  defaultBranch String   @default("main")
+  settings      String?  @db.LongText
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  user          User        @relation(fields: [userId], references: [id], onDelete: Cascade)
+  user          User           @relation(fields: [userId], references: [id], onDelete: Cascade)
+  conversations Conversation[]
   agentTasks    AgentTask[]
 
   @@index([userId])
 }
 
 model AgentTask {
-  id            String            @id @default(cuid())
+  id            String   @id @default(cuid())
   projectId     String
   userId        String
-  prompt        String            @db.LongText
-  status        String            @default("QUEUED")
-  plan          String?           @db.LongText
-  resultSummary String?           @db.LongText
-  createdAt     DateTime          @default(now())
-  updatedAt     DateTime          @updatedAt
+  prompt        String   @db.LongText
+  status        String   @default("QUEUED")
+  plan          String?  @db.LongText
+  resultSummary String?  @db.LongText
+  createdAt     DateTime @default(now())
+  updatedAt     DateTime @updatedAt
 
-  project       WorkspaceProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
-  user          User              @relation(fields: [userId], references: [id], onDelete: Cascade)
-  checkpoints   Checkpoint[]
-  approvals     CommandApproval[]
+  project     WorkspaceProject  @relation(fields: [projectId], references: [id], onDelete: Cascade)
+  user        User              @relation(fields: [userId], references: [id], onDelete: Cascade)
+  checkpoints Checkpoint[]
+  approvals   CommandApproval[]
 
   @@index([projectId])
   @@index([userId])
@@ -216,14 +219,14 @@ model AgentTask {
 }
 
 model Checkpoint {
-  id           String    @id @default(cuid())
+  id           String   @id @default(cuid())
   taskId       String
   snapshotHash String
-  description  String    @db.Text
-  filesChanged String?   @db.LongText
-  createdAt    DateTime  @default(now())
+  description  String   @db.Text
+  filesChanged String?  @db.LongText
+  createdAt    DateTime @default(now())
 
-  task         AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
 }
@@ -238,9 +241,8 @@ model CommandApproval {
   createdAt        DateTime  @default(now())
   resolvedAt       DateTime?
 
-  task             AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
+  task AgentTask @relation(fields: [taskId], references: [id], onDelete: Cascade)
 
   @@index([taskId])
   @@index([status])
 }
-

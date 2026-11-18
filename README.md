@@ -70,6 +70,12 @@ F.R.I.D.A.Y. uses `FRIDAY_AI_PROVIDER=mock` by default so local development work
 
 The gateway normalizes OpenAI Chat Completions, Anthropic Messages, and Gemini `streamGenerateContent` streams into Friday's SSE event format. `AI_STREAM_TIMEOUT_MS` bounds the API-to-provider stream. External-provider requests require valid API keys and a network connection; the automated checks use local fixtures and do not send prompts to provider services.
 
+Friday conversations may be associated with a user-owned Edith workspace using `projectId` on conversation creation or update. `GET /v1/edith/projects` initializes and lists the authenticated user's workspace records. Friday sends only the selected project's name and default branch as descriptive, untrusted system context; it does not read workspace files. Voice input and output use browser speech recognition and synthesis APIs and depend on browser support and microphone permission.
+
+### Edith engine foundation
+
+Edith can request a single-file code proposal from the private Friday AI gateway using `EDITH_MODEL` (default `gemini-2-flash`, which resolves through the configured Gemini model) and the configured server-side provider credentials. Provider use is opt-in on `POST /v1/edith/tasks` or `POST /v1/edith/agent/run` with `use_ai: true`; it sends the task prompt, target file contents, and repository paths to the configured provider, so review its data-handling terms before using private source code. Edith validates the model response into a unified diff and returns it for review without writing files or claiming tests were run. Without that flag, the engine performs workspace analysis without fabricating a code change. Persisted tasks are available through `GET /v1/edith/tasks` and `GET /v1/edith/tasks/:id`; proposal checkpoints record the diff as unapplied. Runner commands require a developer/admin role; commands classified for confirmation create a persistent, one-use approval tied to the exact command and workspace folder. `POST /v1/edith/execute` remains fail-closed because the current runner has no verified isolation backend.
+
 ### Friday documents, knowledge bases, and memory
 
 The authenticated API supports personal knowledge bases and user-managed memory:

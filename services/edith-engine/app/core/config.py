@@ -30,6 +30,9 @@ class Settings(BaseSettings):
     DEFAULT_WORKSPACE_DIR: str = Field(default_factory=_default_workspace_dir)
     ALLOWED_WORKSPACE_ROOTS: str = ""
     RUNNER_HOST_URL: str = "http://127.0.0.1:8003"
+    FRIDAY_AI_SERVICE_URL: str = "http://127.0.0.1:8001"
+    EDITH_MODEL: str = "gemini-2-flash"
+    EDITH_AI_TIMEOUT_SECONDS: float = 120.0
 
     # Internal service-to-service authentication
     INTERNAL_SERVICE_SECRET: str = _DEFAULT_INTERNAL_SECRET
@@ -64,7 +67,12 @@ class Settings(BaseSettings):
     def allowed_workspace_roots_list(self) -> List[str]:
         configured = [r.strip() for r in self.ALLOWED_WORKSPACE_ROOTS.split(",") if r.strip()]
         if configured:
-            return configured
+            base = Path(self.DEFAULT_WORKSPACE_DIR).resolve()
+            roots = []
+            for configured_root in configured:
+                candidate = Path(configured_root).expanduser()
+                roots.append(str(candidate.resolve() if candidate.is_absolute() else (base / candidate).resolve()))
+            return roots
         return [self.DEFAULT_WORKSPACE_DIR]
 
     def validate_security_posture(self) -> None:

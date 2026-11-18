@@ -1,10 +1,17 @@
+import asyncio
+import json
+import threading
+from http.server import BaseHTTPRequestHandler, ThreadingHTTPServer
+
 from fastapi.testclient import TestClient
 
 from app.agent.planner.decomposer import TaskDecomposer
 from app.agent.policies.gateway import CommandPolicyGateway
 from app.core.config import settings
+from app.core.config import Settings
 from app.core.errors import WorkspaceAccessDeniedException
 from app.core.logging import redact_sensitive_text
+from app.agent.executor.friday_ai_client import FridayAIClient
 from app.main import app
 from app.patching.diff_generator import DiffEngine
 from app.repository.indexer import RepositoryIndexer
@@ -31,13 +38,21 @@ def test_task_decomposer():
     assert plan.is_mock is True
 
 
+def test_relative_allowed_workspace_roots_resolve_from_repository_root(tmp_path):
+    local_settings = Settings(DEFAULT_WORKSPACE_DIR=str(tmp_path), ALLOWED_WORKSPACE_ROOTS='.')
+    assert local_settings.allowed_workspace_roots_list == [str(tmp_path.resolve())]
+
+
 def test_policy_gateway_classification_and_chaining_bypass_protection():
     gateway = CommandPolicyGateway()
 
     # Safe read-only commands
     assert gateway.evaluate("git status").decision == "SAFE"
-    assert gateway.evaluate("npm test").decision == "SAFE"
-    assert gateway.evaluate("pytest services/edith-engine/app/tests").decision == "SAFE"
+    assert gateway.evaluate("python --version").decision == "SAFE"
+
+    # Build/test commands execute repository-controlled scripts and need approval.
+    assert gateway.evaluate("npm test").decision == "CONFIRMATION_REQUIRED"
+    assert gateway.evaluate("pytest services/edith-engine/app/tests").decision == "CONFIRMATION_REQUIRED"
 
     # Mutating commands requiring human confirmation
     assert gateway.evaluate("npm install lodash").decision == "CONFIRMATION_REQUIRED"
@@ -45,6 +60,12 @@ def test_policy_gateway_classification_and_chaining_bypass_protection():
 
     # Bypass attempts: safe prefixes followed by shell operators or unsafe git flags must NOT be SAFE
     assert gateway.evaluate("git status && echo pwned").decision == "CONFIRMATION_REQUIRED"
+    assert gateway.evaluate(r"echo safe\; rm -rf /").decision == "DENIED"
+    assert gateway.evaluate("echo 'value; rm -rf /'").decision == "DENIED"
+    assert gateway.evaluate("git branch -D main").decision == "CONFIRMATION_REQUIRED"
+    assert gateway.evaluate("git diff --output=patch.txt").decision == "CONFIRMATION_REQUIRED"
+    assert gateway.evaluate("rm -rf /tmp/workspace").decision == "DENIED"
+    assert gateway.evaluate("rm -rf 'C:\\Users\\runner'").decision == "DENIED"
     assert gateway.evaluate("echo hello > hacked.txt").decision == "CONFIRMATION_REQUIRED"
     assert gateway.evaluate("git -c core.pager=sh status").decision == "CONFIRMATION_REQUIRED"
     assert gateway.evaluate("git status && rm -rf /").decision == "DENIED"
@@ -86,6 +107,59 @@ def test_diff_engine_generate_and_apply_patch_round_trip():
         assert "mismatch" in str(exc).lower()
 
 
+def test_friday_ai_client_returns_a_bounded_reviewable_proposal():
+    received = {}
+
+    class MockFridayHandler(BaseHTTPRequestHandler):
+        def do_POST(self):
+            received['headers'] = self.headers
+            received['body'] = json.loads(self.rfile.read(int(self.headers['Content-Length'])))
+            response_text = json.dumps({
+                "summary": "Update the greeting value.",
+                "modified_content": "const greeting = 'Hi';\n",
+            })
+            events = [
+                {"event": "chunk", "text": response_text, "metadata": {"is_mock": False, "provider": "local-test-model"}},
+                {"event": "done", "text": "", "metadata": {"is_mock": False, "provider": "local-test-model"}},
+            ]
+            body = "".join(f"data: {json.dumps(event)}\n\n" for event in events).encode()
+            self.send_response(200)
+            self.send_header("Content-Type", "text/event-stream")
+            self.send_header("Content-Length", str(len(body)))
+            self.end_headers()
+            self.wfile.write(body)
+
+        def log_message(self, *_args):
+            pass
+
+    server = ThreadingHTTPServer(("127.0.0.1", 0), MockFridayHandler)
+    thread = threading.Thread(target=server.serve_forever, daemon=True)
+    previous_url = settings.FRIDAY_AI_SERVICE_URL
+    settings.FRIDAY_AI_SERVICE_URL = f"http://127.0.0.1:{server.server_port}"
+    thread.start()
+    try:
+        proposal = asyncio.run(FridayAIClient().propose_file_change(
+            user_id="usr_edith_test",
+            prompt="Change the greeting",
+            relative_path="greeting.js",
+            original_content="const greeting = 'Hello';\n",
+            repository_paths=["greeting.js"],
+            model="local-test-model",
+        ))
+    finally:
+        settings.FRIDAY_AI_SERVICE_URL = previous_url
+        server.shutdown()
+        thread.join(timeout=2)
+        server.server_close()
+
+    assert proposal.is_mock is False
+    assert proposal.model == "local-test-model"
+    assert proposal.modified_content == "const greeting = 'Hi';\n"
+    assert received['headers']['X-Internal-Service-Token'] == settings.INTERNAL_SERVICE_SECRET
+    assert received['headers']['X-User-Id'] == "usr_edith_test"
+    assert received['body']['messages'][0]['content']
+
+
 def test_repository_indexer_allowlist_and_traversal_guards(tmp_path):
     outside_dir = tmp_path / "outside"
     outside_dir.mkdir()
@@ -98,16 +172,29 @@ def test_repository_indexer_allowlist_and_traversal_guards(tmp_path):
     test_py.write_text("class StarkCorp:\n    def build_suit(self):\n        pass\n")
     bin_file = ws_dir / "blob.bin"
     bin_file.write_bytes(b"PNG\x00\x01\x02")
+    env_file = ws_dir / ".env"
+    env_file.write_text("GEMINI_API_KEY=not-for-agent")
+    private_key = ws_dir / "deploy.pem"
+    private_key.write_text("private-key-material")
 
     indexer = RepositoryIndexer(allowed_roots=[str(ws_dir)])
     files = indexer.scan_file_tree(str(ws_dir))
     assert any(f.relative_path == "sample.py" for f in files)
+    assert not any(f.relative_path in {".env", "deploy.pem"} for f in files)
     sample_entry = next(f for f in files if f.relative_path == "sample.py")
     assert any(s.name == "StarkCorp" and s.symbol_type == "class" for s in sample_entry.symbols)
 
     # Reading an allowed file succeeds
     read_res = indexer.read_workspace_file(str(ws_dir), "sample.py")
     assert "StarkCorp" in read_res["content"]
+
+    # Direct reads must reject credential files, not only hide them from scans.
+    for sensitive_path in (".env", "deploy.pem"):
+        try:
+            indexer.read_workspace_file(str(ws_dir), sensitive_path)
+            assert False, "Expected sensitive-file access to be denied"
+        except WorkspaceAccessDeniedException:
+            pass
 
     # Escaping via ../ is denied
     try:
@@ -183,7 +270,8 @@ def test_api_auth_boundaries_diff_apply_and_agent_endpoints():
     assert agent_res.status_code == 200
     steps = agent_res.json()
     assert len(steps) >= 4
-    assert any(s["phase"] == "patch_proposal" and s["is_mock"] is True for s in steps)
+    assert any(s["title"] == "AI proposal not requested" and s["is_mock"] is True for s in steps)
+    assert not any(s["phase"] == "patch_proposal" for s in steps)
     assert not any("3 passed in 0.38s" in (s.get("tool_output") or "") for s in steps)
 
 

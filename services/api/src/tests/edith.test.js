@@ -96,6 +96,20 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
         return;
       }
 
+      if (req.url === '/v1/agent/run') {
+        res.writeHead(200, { 'Content-Type': 'application/json' });
+        res.end(JSON.stringify([
+          {
+            step_id: 'step_proposal', phase: 'patch_proposal', title: 'Patch Preview Ready: sample.js',
+            file_path: 'sample.js', original_content: 'const value = 1;\n', modified_content: 'const value = 2;\n',
+            diff_text: '--- a/sample.js\n+++ b/sample.js\n@@ -1 +1 @@\n-const value = 1;\n+const value = 2;\n',
+            status: 'completed', is_mock: true
+          },
+          { step_id: 'step_complete', phase: 'complete', title: 'Analysis complete', detail: 'Review only.', status: 'completed', is_mock: true }
+        ]));
+        return;
+      }
+
       res.writeHead(404);
       res.end();
     });
@@ -155,6 +169,7 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
       name: 'Edith Engineer'
     });
     createdUserIds.push(registered.user.id);
+    await prisma.user.update({ where: { id: registered.user.id }, data: { role: 'DEVELOPER' } });
     ownerWorkspace = path.join(
       config.EDITH_WORKSPACES_DIR,
       crypto.createHash('sha256').update(registered.user.id).digest('hex').slice(0, 32)
@@ -164,6 +179,20 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
       Authorization: `Bearer ${registered.tokens.accessToken}`,
       'X-Request-Id': 'edith-corr-1'
     };
+
+    const regularUser = await authService.register({
+      email: `edith_user_${Date.now()}@edith.corp`,
+      password,
+      name: 'Edith Regular User'
+    });
+    createdUserIds.push(regularUser.user.id);
+    const regularUserExec = await fetch(`${baseUrl}/execute`, {
+      method: 'POST',
+      headers: { ...headers, Authorization: `Bearer ${regularUser.tokens.accessToken}` },
+      body: JSON.stringify({ command: 'git status' })
+    });
+    assert.equal(regularUserExec.status, 403);
+    assert.equal((await regularUserExec.json()).errorCode, 'DEVELOPER_ACCESS_REQUIRED');
 
     // 1. Unauthenticated access rejected
     const unauth = await fetch(`${baseUrl}/policies/evaluate`, {
@@ -177,7 +206,7 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
     const denied = await fetch(`${baseUrl}/execute`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ command: 'rm -rf /', approved: true })
+      body: JSON.stringify({ command: 'rm -rf /' })
     });
     assert.equal(denied.status, 403);
     assert.equal(observedRunnerCalls.length, 0);
@@ -193,11 +222,21 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
     assert.equal(needsApprovalJson.errorCode, 'APPROVAL_REQUIRED');
     assert.equal(observedRunnerCalls.length, 0);
 
-    // 4. Approved mutating command executes via runner with internal auth headers
+    // A durable approval is scoped to the exact command and workspace path.
+    const approvalId = needsApprovalJson.data.approvalId;
+    assert.ok(approvalId);
+    const approved = await fetch(`${baseUrl}/approvals/${approvalId}`, {
+      method: 'PATCH',
+      headers,
+      body: JSON.stringify({ status: 'APPROVED' })
+    });
+    assert.equal(approved.status, 200);
+
+    // 4. One-use approved command is forwarded from the authenticated user's workspace.
     const approvedExec = await fetch(`${baseUrl}/execute`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ command: 'npm install zod', approved: true })
+      body: JSON.stringify({ command: 'npm install zod', approval_id: approvalId })
     });
     assert.equal(approvedExec.status, 200);
     const execJson = await approvedExec.json();
@@ -205,6 +244,36 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
     assert.equal(observedRunnerCalls.length, 1);
     assert.equal(observedRunnerCalls[0].headers['x-internal-service-token'], config.INTERNAL_SERVICE_SECRET);
     assert.equal(observedRunnerCalls[0].headers['x-user-id'], registered.user.id);
+    assert.equal(observedRunnerCalls[0].body.cwd, ownerWorkspace);
+
+    const replayedApproval = await fetch(`${baseUrl}/execute`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ command: 'npm install zod', approval_id: approvalId })
+    });
+    assert.equal(replayedApproval.status, 409);
+
+    // A durable agent task stores the reviewable diff and a non-applied checkpoint.
+    const taskRes = await fetch(`${baseUrl}/tasks`, {
+      method: 'POST', headers,
+      body: JSON.stringify({ prompt: 'Change the sample value', target_file: 'sample.js' })
+    });
+    assert.equal(taskRes.status, 201);
+    const taskJson = await taskRes.json();
+    assert.equal(taskJson.data.task.status, 'WAITING_FOR_REVIEW');
+    assert.equal(taskJson.data.steps[0].phase, 'patch_proposal');
+
+    const taskDetail = await fetch(`${baseUrl}/tasks/${taskJson.data.task.id}`, { headers });
+    assert.equal(taskDetail.status, 200);
+    const taskDetailJson = await taskDetail.json();
+    assert.equal(taskDetailJson.data.result.steps[0].modified_content, 'const value = 2;\n');
+    assert.equal(JSON.parse(taskDetailJson.data.task.checkpoints[0].filesChanged)[0].applied, false);
+    const taskList = await fetch(`${baseUrl}/tasks?limit=10&offset=0`, { headers });
+    assert.equal(taskList.status, 200);
+    assert.ok((await taskList.json()).data.tasks.some((task) => task.id === taskJson.data.task.id));
+    const crossOwnerTask = await fetch(`${baseUrl}/tasks/${taskJson.data.task.id}`, {
+      headers: { ...headers, Authorization: `Bearer ${regularUser.tokens.accessToken}` }
+    });
+    assert.equal(crossOwnerTask.status, 404);
 
     // Workspace paths supplied by callers are replaced with a user-owned path.
     const scanRes = await fetch(`${baseUrl}/repository/scan`, {
@@ -220,7 +289,7 @@ test('E.D.I.T.H. API: Internal service auth headers, fail-closed policy enforcem
     const unavailableExec = await fetch(`${baseUrl}/execute`, {
       method: 'POST',
       headers,
-      body: JSON.stringify({ command: 'npm test' })
+      body: JSON.stringify({ command: 'git status' })
     });
     assert.equal(unavailableExec.status, 503);
     assert.equal((await unavailableExec.json()).errorCode, 'ISOLATED_EXECUTION_UNAVAILABLE');

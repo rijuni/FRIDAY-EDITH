@@ -21,23 +21,25 @@ export function EdithAgentPanel({
   onBusyChange
 }) {
   const [prompt, setPrompt] = useState('');
+  const [useAI, setUseAI] = useState(false);
   const [isBusy, setIsBusy] = useState(false);
   const [error, setError] = useState(null);
   const [lastPrompt, setLastPrompt] = useState(null);
+  const [lastTaskId, setLastTaskId] = useState(null);
   const [agentSteps, setAgentSteps] = useState([
     {
       step_id: 'init_1',
       phase: 'complete',
       title: 'E.D.I.T.H. Workflow Agent Ready',
       detail:
-        'Workspace analysis and diff previews are available. Patch previews are clearly marked and require your review before applying.',
+        'Analyze your workspace and request a provider-generated patch only when you enable AI use. Changes remain review-only until you apply them.',
       status: 'completed'
     }
   ]);
 
   const quickActions = [
     { label: '/scan', text: 'Inspect active workspace symbols and summarize architecture' },
-    { label: '/patch', text: 'Preview a safe diff patch for gateway.py policy checks' },
+    { label: '/patch', text: 'Request a reviewable diff for the active file' },
     { label: '/test', text: 'Prepare pytest verification plan and check command policy' },
     { label: '/audit', text: 'Analyze diff_generator and summarize patch verification' }
   ];
@@ -64,18 +66,21 @@ export function EdithAgentPanel({
       {
         step_id: pendingId,
         phase: 'thinking',
-        title: 'Executing Workspace Workflow...',
-        detail: `Sending instruction to E.D.I.T.H. Engine: "${textToRun}"`,
+      title: 'Starting Edith Task...',
+      detail: useAI
+        ? 'Sending the task and selected file to the configured AI provider for a reviewable proposal.'
+        : 'Analyzing the workspace locally without sending source code to an AI provider.',
         status: 'running'
       }
     ]);
 
     try {
-      const res = await apiFetch('/v1/edith/agent/run', {
+      const res = await apiFetch('/v1/edith/tasks', {
         method: 'POST',
         body: JSON.stringify({
           prompt: textToRun,
-          ...(activeFile ? { target_file: activeFile } : {})
+          ...(activeFile ? { target_file: activeFile } : {}),
+          use_ai: useAI
         })
       });
 
@@ -85,11 +90,18 @@ export function EdithAgentPanel({
         throw new Error(message);
       }
 
-      if (!Array.isArray(data) || data.length === 0) {
+      const task = data?.data?.task;
+      const steps = data?.data?.steps;
+      if (!task?.id || !Array.isArray(steps) || steps.length === 0) {
         throw new Error('E.D.I.T.H. Engine returned an empty workflow response.');
       }
 
-      setAgentSteps((prev) => [...prev.filter((s) => s.step_id !== pendingId), ...data]);
+      setLastTaskId(task.id);
+      setAgentSteps((prev) => [
+        ...prev.filter((s) => s.step_id !== pendingId),
+        { step_id: `task_${task.id}`, phase: 'tool_result', title: `Task ${task.status}`, detail: `Saved reviewable task ${task.id}.`, status: 'completed' },
+        ...steps
+      ]);
     } catch (err) {
       setAgentSteps((prev) => prev.filter((s) => s.step_id !== pendingId));
       setError(err?.message || 'Unable to reach E.D.I.T.H. Agent Engine.');
@@ -144,6 +156,24 @@ export function EdithAgentPanel({
             </button>
           ))}
         </div>
+        <label className="mt-2 flex items-start gap-2 rounded-lg border border-white/10 bg-black/20 p-2 cursor-pointer">
+          <input
+            type="checkbox"
+            checked={useAI}
+            onChange={(event) => setUseAI(event.target.checked)}
+            disabled={isBusy}
+            className="mt-0.5 accent-cyan-400"
+          />
+          <span className="min-w-0">
+            <span className="block text-[10px] font-semibold text-slate-200">Use configured AI provider</span>
+            <span className="block text-[9px] leading-relaxed text-slate-400">
+              Sends the task and target file (selected or chosen by Edith) to the provider for a patch.
+            </span>
+          </span>
+        </label>
+        {lastTaskId && (
+          <p className="mt-1 truncate px-1 text-[9px] text-slate-500" title={lastTaskId}>Saved task: {lastTaskId}</p>
+        )}
       </div>
 
       {/* Execution Stream Feed */}

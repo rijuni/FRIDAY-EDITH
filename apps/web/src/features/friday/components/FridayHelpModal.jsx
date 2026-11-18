@@ -11,7 +11,9 @@ import {
   CheckCircle2,
   Loader2,
   Paperclip,
-  Terminal
+  Terminal,
+  Mic,
+  FolderOpen
 } from 'lucide-react';
 import { apiFetch, safeParseJson } from '../../../lib/apiClient.js';
 import { useAuthStore } from '../../../stores/authStore.js';
@@ -225,6 +227,26 @@ export function FridayHelpModal({ isOpen, onClose, onOpenEdith }) {
 
           {/* Quick Help Cards */}
           <div className="grid grid-cols-1 sm:grid-cols-2 gap-3">
+            <div className="p-3.5 rounded-2xl frosted-glass-card space-y-1.5">
+              <div className="flex items-center gap-2 text-purple-200 font-semibold">
+                <Mic className="w-3.5 h-3.5 text-purple-400" />
+                <span>Voice</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Use the microphone button to dictate a message, then review and send it. Select Read aloud under a Friday response to hear it through your browser. Voice input depends on browser support and microphone permission.
+              </p>
+            </div>
+
+            <div className="p-3.5 rounded-2xl frosted-glass-card space-y-1.5">
+              <div className="flex items-center gap-2 text-cyan-200 font-semibold">
+                <FolderOpen className="w-3.5 h-3.5 text-cyan-400" />
+                <span>Project Context</span>
+              </div>
+              <p className="text-[11px] text-slate-400 leading-relaxed">
+                Choose an Edith project above the message box to associate the conversation with that workspace. Friday receives the project name and default branch as context; it does not read your workspace files.
+              </p>
+            </div>
+
             <div className="p-3.5 rounded-2xl frosted-glass-card space-y-1.5">
               <div className="flex items-center gap-2 text-purple-200 font-semibold">
                 <Paperclip className="w-3.5 h-3.5 text-purple-400" />

@@ -24,6 +24,8 @@ class AgentRunRequest(BaseModel):
     prompt: str = Field(..., min_length=1, max_length=settings.MAX_PROMPT_LENGTH)
     workspace_root: Optional[str] = Field(default=None, max_length=512)
     target_file: Optional[str] = Field(default=None, max_length=512)
+    model: Optional[str] = Field(default=None, max_length=100)
+    use_ai: bool = False
 
 
 class PlanRequest(BaseModel):
@@ -122,7 +124,7 @@ async def scan_repository(req: RepoScanRequest):
     files = repo_indexer.scan_file_tree(root_dir=resolved, max_files=req.max_files)
     total_symbols = sum(len(f.symbols) for f in files)
     return RepoScanResponse(
-        workspace_root=resolved,
+        workspace_root="user-workspace",
         total_files=len(files),
         total_symbols=total_symbols,
         files=files,
@@ -139,12 +141,15 @@ async def read_workspace_file(req: FileReadRequest):
 
 
 @router.post("/run", response_model=List[AgentStep])
-async def run_agent_task(req: AgentRunRequest):
+async def run_agent_task(req: AgentRunRequest, user_id: str = Depends(verify_internal_caller)):
     steps: List[AgentStep] = []
     async for step in coding_agent.execute_task_stream(
         prompt=req.prompt,
         workspace_root=req.workspace_root,
         target_file=req.target_file,
+        user_id=user_id,
+        model=req.model,
+        use_ai=req.use_ai,
     ):
         steps.append(step)
     return steps
