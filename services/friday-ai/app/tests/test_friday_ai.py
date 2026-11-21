@@ -2,9 +2,21 @@ import sys
 import os
 sys.path.insert(0, os.path.abspath(os.path.join(os.path.dirname(__file__), "../..")))
 
+# Ensure deterministic mock mode during test runs; prevent external network egress
+os.environ["FRIDAY_AI_PROVIDER"] = "mock"
+os.environ["OPENAI_API_KEY"] = ""
+os.environ["ANTHROPIC_API_KEY"] = ""
+os.environ["GEMINI_API_KEY"] = ""
+
 from fastapi.testclient import TestClient
 from app.main import app
 from app.core.config import settings
+
+# Enforce clean mock baseline on loaded settings
+settings.FRIDAY_AI_PROVIDER = "mock"
+settings.OPENAI_API_KEY = None
+settings.ANTHROPIC_API_KEY = None
+settings.GEMINI_API_KEY = None
 from app.core.errors import ProviderConfigurationException, FridayAIException
 from app.core.logging import RedactingContextFilter
 from app.context.window import context_manager
@@ -232,6 +244,46 @@ def test_rag_user_and_workspace_isolation():
     assert retriever.retrieve("quantum", chunks, user_id="") == []
 
 
+def test_hybrid_rag_bm25_and_vector_embeddings():
+    chunks = [
+        {
+            "id": "c1",
+            "user_id": "usr_dev",
+            "source": "auth.md",
+            "text": "Authentication uses Argon2id and SHA-256 hashed refresh tokens.",
+            "embedding": [0.9, 0.1, 0.0]
+        },
+        {
+            "id": "c2",
+            "user_id": "usr_dev",
+            "source": "styling.md",
+            "text": "Nebula theme uses cyan and violet energy glow effects.",
+            "embedding": [0.0, 0.1, 0.9]
+        }
+    ]
+    lexical_res = retriever.retrieve(
+        "argon2id refresh tokens",
+        chunks,
+        user_id="usr_dev",
+        top_k=2
+    )
+    assert len(lexical_res) >= 1
+    assert lexical_res[0]["id"] == "c1"
+    assert lexical_res[0]["bm25_score"] > 0
+    assert lexical_res[0]["relevance_score"] > lexical_res[-1]["relevance_score"]
+
+    vector_res = retriever.retrieve(
+        "login credentials",
+        chunks,
+        user_id="usr_dev",
+        top_k=2,
+        query_embedding=[0.9, 0.1, 0.0]
+    )
+    assert len(vector_res) >= 1
+    assert vector_res[0]["id"] == "c1"
+    assert vector_res[0]["semantic_score"] > 0.8
+
+
 def test_log_redaction():
     log_filter = RedactingContextFilter()
     record = logging.LogRecord(
@@ -324,14 +376,27 @@ def test_openai_provider_normalizes_sse_without_network():
 def test_anthropic_and_gemini_provider_stream_normalization():
     class FakeResponse:
         status_code = 200
-        def __init__(self, lines): self.lines = lines
+        def __init__(self, lines=None, json_data=None):
+            self.lines = lines or []
+            self._json_data = json_data
         async def aiter_lines(self):
-            for line in self.lines: yield line
-        async def aclose(self): return None
+            for line in self.lines:
+                yield line
+        def json(self):
+            if self._json_data is not None:
+                return self._json_data
+            return {"candidates": [{"content": {"parts": [{"text": "Gemini"}]}}]}
+        async def aclose(self):
+            return None
 
     class FakeClient:
         last_request = None
-        def __init__(self, **kwargs): pass
+        def __init__(self, **kwargs):
+            pass
+        async def __aenter__(self):
+            return self
+        async def __aexit__(self, exc_type, exc_val, exc_tb):
+            return None
         def build_request(self, method, url, headers, json):
             FakeClient.last_request = {"method": method, "url": url, "headers": headers, "json": json}
             return FakeClient.last_request
@@ -339,7 +404,11 @@ def test_anthropic_and_gemini_provider_stream_normalization():
             if "anthropic.com" in request["url"]:
                 return FakeResponse(['data: {"type":"content_block_delta","delta":{"type":"text_delta","text":"Claude"}}'])
             return FakeResponse(['data: {"candidates":[{"content":{"parts":[{"text":"Gemini"}]}}]}'])
-        async def aclose(self): return None
+        async def post(self, url, headers=None, json=None):
+            FakeClient.last_request = {"method": "POST", "url": url, "headers": headers or {}, "json": json or {}}
+            return FakeResponse(json_data={"candidates": [{"content": {"parts": [{"text": "Gemini"}]}}]})
+        async def aclose(self):
+            return None
 
     original_client = http_providers.httpx.AsyncClient
     original_keys = (settings.ANTHROPIC_API_KEY, settings.GEMINI_API_KEY)
@@ -450,6 +519,7 @@ if __name__ == "__main__":
     test_document_parse_and_validation()
     test_context_window_compaction()
     test_rag_user_and_workspace_isolation()
+    test_hybrid_rag_bm25_and_vector_embeddings()
     test_log_redaction()
     test_document_parser_rejects_mime_mismatch_and_sanitizes_filename()
     test_docx_text_extraction_and_zip_safety()
@@ -459,5 +529,5 @@ if __name__ == "__main__":
     test_anthropic_and_gemini_provider_stream_normalization()
     test_clamav_scanner_protocol_and_fail_closed()
     test_chat_stream_injects_scoped_retrieval_and_user_memory()
-    print("All 16 F.R.I.D.A.Y. AI Python tests passed successfully.")
+    print("All 17 F.R.I.D.A.Y. AI Python tests passed successfully.")
 

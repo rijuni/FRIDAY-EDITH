@@ -473,9 +473,12 @@ export const useFridayStore = create((set, get) => ({
       const uploadedAttachments = [];
       for (const [index, att] of stagedAttachments.entries()) {
         set({ uploadStatus: `Uploading and scanning ${att.filename} (${index + 1}/${stagedAttachments.length})...` });
+        const baseOrigin = typeof window !== 'undefined' && window.location?.origin
+          ? window.location.origin
+          : 'http://localhost';
         const uploadUrl = new URL(
           `/v1/friday/conversations/${encodeURIComponent(convId)}/attachments/upload`,
-          window.location.origin
+          baseOrigin
         );
         uploadUrl.searchParams.set('filename', att.filename);
         const uploadRes = await apiFetch(`${uploadUrl.pathname}${uploadUrl.search}`, {

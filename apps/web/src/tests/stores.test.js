@@ -131,6 +131,7 @@ describe('Frontend Zustand stores (authStore & fridayStore)', () => {
   it('useFridayStore uploads pendingAttachments and links attachmentIds when sending', async () => {
     const prevFetch = globalThis.fetch;
     let observedMessageBody = null;
+    let observedUpload = null;
 
     globalThis.fetch = async (url, init = {}) => {
       if (url === '/v1/friday/conversations' && init.method === 'POST') {
@@ -139,7 +140,12 @@ describe('Frontend Zustand stores (authStore & fridayStore)', () => {
           { status: 201 }
         );
       }
-      if (url === '/v1/friday/conversations/conv_att/attachments' && init.method === 'POST') {
+      if (url.startsWith('/v1/friday/conversations/conv_att/attachments/upload') && init.method === 'POST') {
+        observedUpload = {
+          url,
+          headers: init.headers,
+          body: init.body
+        };
         return new Response(
           JSON.stringify({
             data: {
@@ -157,7 +163,10 @@ describe('Frontend Zustand stores (authStore & fridayStore)', () => {
       }
       if (url === '/v1/friday/conversations/conv_att/messages' && init.method === 'POST') {
         observedMessageBody = JSON.parse(init.body);
-        const stream = createSseStream(['data: {"event":"chunk","text":"Reviewed spec.md"}\n\n']);
+        const stream = createSseStream([
+          'data: {"event":"chunk","text":"Reviewed spec.md"}\n\n',
+          'data: {"event":"done"}\n\n'
+        ]);
         return new Response(stream, {
           status: 200,
           headers: { 'Content-Type': 'text/event-stream' }
@@ -175,11 +184,13 @@ describe('Frontend Zustand stores (authStore & fridayStore)', () => {
         systemPrompt: 'Custom prompt',
         temperature: 0.4
       });
+      const filePayload = new Blob(['# Spec\nHello world'], { type: 'text/markdown' });
       useFridayStore.getState().addPendingAttachment({
         tempId: 'tmp_1',
         filename: 'spec.md',
         mimeType: 'text/markdown',
         sizeBytes: 18,
+        file: filePayload,
         content: '# Spec\nHello world'
       });
 
@@ -187,6 +198,12 @@ describe('Frontend Zustand stores (authStore & fridayStore)', () => {
       const state = useFridayStore.getState();
 
       assert.equal(state.pendingAttachments.length, 0);
+      assert.ok(observedUpload);
+      assert.ok(observedUpload.url.includes('filename=spec.md'));
+      const uploadMime = observedUpload.headers instanceof Headers
+        ? observedUpload.headers.get('x-file-mime-type')
+        : (observedUpload.headers['X-File-Mime-Type'] || observedUpload.headers['x-file-mime-type']);
+      assert.equal(uploadMime, 'text/markdown');
       assert.deepEqual(observedMessageBody.attachmentIds, ['att_db_1']);
       assert.equal(observedMessageBody.model, 'gpt-4o');
       assert.equal(observedMessageBody.temperature, 0.4);

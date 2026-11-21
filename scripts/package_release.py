@@ -7,7 +7,7 @@ import tempfile
 # Sensitive content detection patterns for pre-audit
 CONTENT_PATTERNS = [
     (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", re.I), "Private key block detected"),
-    (re.compile(r"\$argon2(?:id|i|d)?\$", re.I), "Argon2 password hash detected"),
+    (re.compile(r"\$argon2(?:id|i|d)?\$v=\d+", re.I), "Argon2 password hash detected"),
     (re.compile(r"INSERT\s+INTO\s+[`\"]?(?:User|Session|AuditLog|ProviderKey)[`\"]?\s+", re.I), "Database user/credential export dump detected"),
     (re.compile(r"^-- (?:MySQL dump|PostgreSQL database dump)|^SQLite format 3|-- Dump completed on \d{4}-\d{2}-\d{2}", re.M), "Database dump signature detected"),
 ]

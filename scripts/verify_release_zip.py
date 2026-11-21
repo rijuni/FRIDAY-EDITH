@@ -12,7 +12,7 @@ MAX_ENTRY_BYTES = 20 * 1024 * 1024
 
 SENSITIVE_PATTERNS = [
     (re.compile(r"-----BEGIN (?:RSA |EC |OPENSSH |DSA )?PRIVATE KEY-----", re.I), "Private key block detected"),
-    (re.compile(r"\$argon2(?:id|i|d)?\$", re.I), "Argon2 password hash detected"),
+    (re.compile(r"\$argon2(?:id|i|d)?\$v=\d+", re.I), "Argon2 password hash detected"),
     (re.compile(r"DATABASE_URL\s*=\s*['\"]?mysql://([^:/?#]+):([^@/?#]+)@", re.I), "Database URL with credentials detected"),
 ]
 

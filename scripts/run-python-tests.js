@@ -37,7 +37,14 @@ function runFridayAi() {
   const result = spawnSync(pythonBin, [testScript], {
     cwd: serviceDir,
     stdio: 'inherit',
-    env: { ...process.env, PYTHONPATH: serviceDir }
+    env: {
+      ...process.env,
+      PYTHONPATH: serviceDir,
+      FRIDAY_AI_PROVIDER: 'mock',
+      OPENAI_API_KEY: '',
+      ANTHROPIC_API_KEY: '',
+      GEMINI_API_KEY: ''
+    }
   });
 
   if (result.status !== 0) {
