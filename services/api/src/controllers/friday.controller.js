@@ -151,18 +151,107 @@ async function parseStreamedDocument(req, { filename, mimeType, signal }) {
   return payload.data;
 }
 
+const CANONICAL_PROVIDER_MODELS = [
+  { id: 'claude-3-7-sonnet', label: 'Anthropic · Claude 3.7 Sonnet', provider: 'anthropic' },
+  { id: 'claude-3-5-sonnet', label: 'Anthropic · Claude 3.5 Sonnet', provider: 'anthropic' },
+  { id: 'gpt-4o', label: 'OpenAI · GPT-4o', provider: 'openai' },
+  { id: 'gpt-4o-mini', label: 'OpenAI · GPT-4o Mini', provider: 'openai' },
+  { id: 'gemini-2-flash', label: 'Gemini · Gemini 2.0 Flash', provider: 'gemini' },
+  { id: 'gemini-1.5-pro', label: 'Gemini · Gemini 1.5 Pro', provider: 'gemini' }
+];
+
+function resolveModelProvider(modelId) {
+  const norm = String(modelId || '').toLowerCase();
+  if (norm.startsWith('gemini') || norm.includes('google')) return 'gemini';
+  if (norm.startsWith('gpt') || norm.includes('openai') || norm.startsWith('o1') || norm.startsWith('o3')) return 'openai';
+  if (norm.startsWith('claude') || norm.includes('anthropic')) return 'anthropic';
+  return 'anthropic';
+}
+
 async function fetchFridayModels(req) {
-  const response = await fetch(`${getFridayAiUrl()}/v1/chat/models`, {
-    headers: {
-      'X-Internal-Service-Token': config.INTERNAL_SERVICE_SECRET,
-      'X-User-Id': req.user.id,
-      'X-Request-Id': req.id || ''
-    },
-    signal: AbortSignal.timeout(config.AI_REQUEST_TIMEOUT_MS)
-  });
-  const payload = await response.json().catch(() => null);
-  if (!response.ok) throw new Error(payload?.message || 'Unable to load configured F.R.I.D.A.Y. models');
-  return payload?.data || { models: [] };
+  let systemModels = [];
+  let providerMode = 'auto';
+
+  try {
+    const response = await fetch(`${getFridayAiUrl()}/v1/chat/models`, {
+      headers: {
+        'X-Internal-Service-Token': config.INTERNAL_SERVICE_SECRET,
+        'X-User-Id': req.user.id,
+        'X-Request-Id': req.id || ''
+      },
+      signal: AbortSignal.timeout(config.AI_REQUEST_TIMEOUT_MS)
+    });
+    const payload = await response.json().catch(() => null);
+    if (response.ok && payload?.data) {
+      systemModels = Array.isArray(payload.data.models) ? payload.data.models : [];
+      providerMode = payload.data.provider_mode || 'auto';
+    }
+  } catch (err) {
+    logger.warn({ err: err?.message, requestId: req.id }, 'Upstream F.R.I.D.A.Y. model list probe failed');
+  }
+
+  // Load user's vaulted provider keys
+  let userKeys = [];
+  try {
+    if (req.user?.id) {
+      userKeys = await providerKeyService.listUserKeys({ userId: req.user.id });
+    }
+  } catch (err) {
+    logger.warn({ err: err?.message, userId: req.user?.id }, 'Failed to retrieve user vaulted keys for model discovery');
+  }
+
+  const userProviders = new Set(userKeys.map((k) => k.provider.toLowerCase()));
+  const systemModelIds = new Set(systemModels.map((m) => m.id));
+
+  // Build merged model list
+  const mergedModels = [];
+
+  // 1. Add system models
+  for (const m of systemModels) {
+    const prov = resolveModelProvider(m.id);
+    const hasUserKey = userProviders.has(prov);
+    const isMock = providerMode === 'mock';
+    mergedModels.push({
+      id: m.id,
+      label: m.label || m.id,
+      isAvailable: isMock || Boolean(m.isAvailable ?? true),
+      configuredBy: hasUserKey ? 'user_vault' : (isMock ? 'mock' : 'system'),
+      provider: prov
+    });
+  }
+
+  // 2. If user has vaulted keys for providers whose models are not in system models, inject canonical models
+  for (const canon of CANONICAL_PROVIDER_MODELS) {
+    if (userProviders.has(canon.provider) && !systemModelIds.has(canon.id)) {
+      mergedModels.push({
+        id: canon.id,
+        label: canon.label,
+        isAvailable: true,
+        configuredBy: 'user_vault',
+        provider: canon.provider
+      });
+      systemModelIds.add(canon.id);
+    }
+  }
+
+  // 3. Fallback: if list is empty, return canonical models with isAvailable: false
+  if (mergedModels.length === 0) {
+    for (const canon of CANONICAL_PROVIDER_MODELS) {
+      mergedModels.push({
+        id: canon.id,
+        label: canon.label,
+        isAvailable: false,
+        configuredBy: 'unconfigured',
+        provider: canon.provider
+      });
+    }
+  }
+
+  return {
+    provider_mode: providerMode,
+    models: mergedModels,
+    user_configured_providers: [...userProviders]
+  };
 }
 
 export async function createConversation(req, res, next) {

@@ -170,7 +170,10 @@ const VAULT_HKDF_INFO = Buffer.from('friday-edith-secret-vault', 'utf8');
  * @returns {Buffer}
  */
 export function deriveSecretKey(salt, customKey = null) {
-  const masterKey = customKey || config.ENCRYPTION_MASTER_KEY || config.JWT_SECRET;
+  const masterKey = customKey || config.ENCRYPTION_MASTER_KEY;
+  if (!masterKey) {
+    throw new Error('Missing encryption master key for vault key derivation');
+  }
   return crypto.hkdfSync('sha256', Buffer.from(masterKey, 'utf8'), salt, VAULT_HKDF_INFO, VAULT_KEY_BYTES);
 }
 

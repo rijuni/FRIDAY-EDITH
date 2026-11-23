@@ -7,6 +7,7 @@ import {
   FileCode,
   FolderOpen,
   GitBranch,
+  GitPullRequest,
   ShieldCheck,
   ArrowLeftRight,
   PanelLeftClose,
@@ -25,6 +26,7 @@ import { MonacoDiffViewer } from '../diffs/MonacoDiffViewer';
 import { RunnerTerminal } from '../terminal/RunnerTerminal';
 import { CommandApprovalDrawer } from '../agent/CommandApprovalDrawer';
 import { EdithAgentPanel } from '../agent/EdithAgentPanel';
+import { GitHubIntegrationModal } from '../components/GitHubIntegrationModal';
 import { apiFetch, safeParseJson } from '../../../lib/apiClient';
 
 class EditorErrorBoundary extends Component {
@@ -82,6 +84,7 @@ export function EdithWorkspace() {
   const [bottomTab, setBottomTab] = useState('terminal'); // 'terminal' | 'dag' | 'policy'
   const [sidebarOpen, setSidebarOpen] = useState(true);
   const [agentPanelOpen, setAgentPanelOpen] = useState(true);
+  const [isGithubModalOpen, setIsGithubModalOpen] = useState(false);
 
   // Activity & notifications
   const [isAgentBusy, setIsAgentBusy] = useState(false);
@@ -452,6 +455,16 @@ export function EdithWorkspace() {
           </div>
 
           <div className="flex items-center gap-2">
+            <button
+              type="button"
+              onClick={() => setIsGithubModalOpen(true)}
+              title="Open GitHub Developer Integration"
+              className="flex items-center gap-1.5 px-3 py-1.5 rounded-full bg-white/[0.04] hover:bg-white/[0.08] border border-cyan-400/30 text-xs font-mono text-cyan-300 transition-colors cursor-pointer"
+            >
+              <GitPullRequest className="w-3.5 h-3.5 text-cyan-400" />
+              <span>GitHub</span>
+            </button>
+
             <button
               type="button"
               onClick={() => navigate('/friday')}
@@ -960,6 +973,12 @@ export function EdithWorkspace() {
         isSubmitting={isTerminalBusy || isCheckingPolicy}
         onApprove={handleAuthorizeCommand}
         onDeny={handleDenyCommand}
+      />
+
+      {/* GitHub Developer Integration & PR Approval Modal */}
+      <GitHubIntegrationModal
+        isOpen={isGithubModalOpen}
+        onClose={() => setIsGithubModalOpen(false)}
       />
     </div>
   );

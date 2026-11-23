@@ -53,7 +53,7 @@ describe('Frontend F.R.I.D.A.Y. Modals, Voice Controls & Ingestion Boundaries', 
     useFridayStore.getState().resetState();
   });
 
-  it('FridaySettingsModal renders accessible dialog, model preferences, and controls', async () => {
+  it('FridaySettingsModal renders accessible dialog, model preferences, provider keys vault, and controls', async () => {
     const FridaySettingsModal = await loadJsxComponent(
       'features/friday/components/FridaySettingsModal.jsx',
       'FridaySettingsModal'
@@ -62,13 +62,18 @@ describe('Frontend F.R.I.D.A.Y. Modals, Voice Controls & Ingestion Boundaries', 
     const html = renderToStaticMarkup(
       React.createElement(FridaySettingsModal, {
         isOpen: true,
-        onClose: () => {}
+        onClose: () => { }
       })
     );
 
     assert.match(html, /role="dialog"/);
     assert.match(html, /F\.R\.I\.D\.A\.Y\. Settings/);
     assert.match(html, /Save Changes/);
+    assert.match(html, /AI Provider Keys \(Secret Vault\)/);
+    assert.match(html, /Anthropic \(Claude\)/);
+    assert.match(html, /Google Gemini/);
+    assert.match(html, /OpenAI \(GPT \/ Reasoning\)/);
+    assert.match(html, /AES-256-GCM/);
   });
 
   it('FridayHelpModal renders user guide and support reporting controls', async () => {
@@ -80,7 +85,7 @@ describe('Frontend F.R.I.D.A.Y. Modals, Voice Controls & Ingestion Boundaries', 
     const html = renderToStaticMarkup(
       React.createElement(FridayHelpModal, {
         isOpen: true,
-        onClose: () => {}
+        onClose: () => { }
       })
     );
 
@@ -100,7 +105,7 @@ describe('Frontend F.R.I.D.A.Y. Modals, Voice Controls & Ingestion Boundaries', 
     const html = renderToStaticMarkup(
       React.createElement(FridayMemoryModal, {
         isOpen: true,
-        onClose: () => {}
+        onClose: () => { }
       })
     );
 
@@ -119,7 +124,7 @@ describe('Frontend F.R.I.D.A.Y. Modals, Voice Controls & Ingestion Boundaries', 
     const html = renderToStaticMarkup(
       React.createElement(FridayKnowledgeModal, {
         isOpen: true,
-        onClose: () => {}
+        onClose: () => { }
       })
     );
 

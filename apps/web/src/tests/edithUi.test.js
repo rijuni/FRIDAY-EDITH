@@ -98,6 +98,23 @@ describe('Frontend E.D.I.T.H. utilities, UI rendering & shared workspace package
     assert.match(helpHtml, /Submit Support or Bug Report/);
   });
 
+  it('GitHubIntegrationModal renders accessible dialog, tabs, and zero-trust protection', async () => {
+    const GitHubIntegrationModal = await loadJsxComponent(
+      'features/edith/components/GitHubIntegrationModal.jsx',
+      'GitHubIntegrationModal'
+    );
+
+    const modalHtml = renderToStaticMarkup(
+      React.createElement(GitHubIntegrationModal, { isOpen: true, onClose: () => {} })
+    );
+    assert.match(modalHtml, /role="dialog"/);
+    assert.match(modalHtml, /GitHub Developer Integration/);
+    assert.match(modalHtml, /Connection &amp; Scopes/);
+    assert.match(modalHtml, /Context Inspector/);
+    assert.match(modalHtml, /Governed PR Creator/);
+    assert.match(modalHtml, /Zero-Trust Token Protection/);
+  });
+
   it('Shared workspace packages export expected canonical constants', () => {
     assert.equal(AppRoutes.FRIDAY, '/friday');
     assert.equal(AppRoutes.EDITH, '/edith');

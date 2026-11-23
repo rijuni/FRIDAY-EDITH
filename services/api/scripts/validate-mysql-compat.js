@@ -25,7 +25,13 @@ const LARGE_TEXT_FIELDS = new Set([
   'AgentTask.resultSummary',
   'Checkpoint.description',
   'Checkpoint.filesChanged',
-  'CommandApproval.command'
+  'CommandApproval.command',
+  'IntegrationConnection.encryptedAccessToken',
+  'IntegrationConnection.encryptedRefreshToken',
+  'IntegrationConnection.scopes',
+  'ToolInvocation.redactedInputSummary',
+  'ToolInvocation.resultSummary',
+  'ToolInvocation.errorMessage'
 ]);
 
 function parseModels(schemaText) {
@@ -62,7 +68,11 @@ const EXPECTED_MODELS = new Set([
   'WorkspaceProject',
   'AgentTask',
   'Checkpoint',
-  'CommandApproval'
+  'CommandApproval',
+  'IntegrationConnection',
+  'IntegrationState',
+  'ToolInvocation',
+  'ToolApproval'
 ]);
 
 export function validateMySqlCompatibility() {

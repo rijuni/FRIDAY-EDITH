@@ -11,6 +11,7 @@ dotenv.config({ path: path.resolve(__dirname, '../../../.env') });
 dotenv.config();
 
 const DEFAULT_DEV_JWT_SECRET = 'development_jwt_secret_must_be_overridden_in_prod';
+const DEFAULT_DEV_ENCRYPTION_KEY = 'dev_encryption_master_key_32_chars_min!!';
 const DEFAULT_INTERNAL_SERVICE_SECRET = 'dev_internal_service_secret_change_in_prod';
 
 const envSchema = z.object({
@@ -26,7 +27,7 @@ const envSchema = z.object({
 
   // Auth & Secrets
   JWT_SECRET: z.string().min(16).default(DEFAULT_DEV_JWT_SECRET),
-  ENCRYPTION_MASTER_KEY: z.string().min(16).optional(),
+  ENCRYPTION_MASTER_KEY: z.string().min(16).default(DEFAULT_DEV_ENCRYPTION_KEY),
   JWT_ISSUER: z.string().default('friday-edith-api'),
   JWT_AUDIENCE: z.string().default('friday-edith-clients'),
   JWT_EXPIRES_IN: z.string().default('15m'),
@@ -64,6 +65,9 @@ if (parsed.data.NODE_ENV === 'production') {
   }
   if (parsed.data.INTERNAL_SERVICE_SECRET === DEFAULT_INTERNAL_SERVICE_SECRET) {
     throw new Error('INTERNAL_SERVICE_SECRET must be overridden in production environment');
+  }
+  if (!parsed.data.ENCRYPTION_MASTER_KEY || parsed.data.ENCRYPTION_MASTER_KEY === DEFAULT_DEV_ENCRYPTION_KEY) {
+    throw new Error('ENCRYPTION_MASTER_KEY must be configured with a unique secret in production environment');
   }
 }
 

@@ -10,6 +10,7 @@ import { healthRouter } from './routes/v1/health.routes.js';
 import { authRouter } from './routes/v1/auth.routes.js';
 import { fridayRouter } from './routes/v1/friday.routes.js';
 import { edithRouter } from './routes/v1/edith.routes.js';
+import { integrationRouter } from './routes/v1/integration.routes.js';
 
 export const app = express();
 
@@ -42,6 +43,7 @@ app.use('/v1/health', healthRouter);
 app.use('/v1/auth', authRouter);
 app.use('/v1/friday', fridayRouter);
 app.use('/v1/edith', edithRouter);
+app.use('/v1/integrations', integrationRouter);
 
 // 404 Handler
 app.use((req, res) => {

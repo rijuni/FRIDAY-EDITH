@@ -32,6 +32,9 @@ model User {
   knowledgeBases KnowledgeBase[]
   projects       WorkspaceProject[]
   agentTasks     AgentTask[]
+  integrations   IntegrationConnection[]
+  integrationStates IntegrationState[]
+  toolInvocations ToolInvocation[]
 
   @@index([email])
 }
@@ -245,4 +248,80 @@ model CommandApproval {
 
   @@index([taskId])
   @@index([status])
+}
+
+model IntegrationConnection {
+  id                   String    @id @default(cuid())
+  userId               String
+  provider             String
+  externalAccountId    String?
+  displayName          String?
+  encryptedAccessToken String    @db.Text
+  encryptedRefreshToken String?  @db.Text
+  scopes               String    @db.Text
+  status               String    @default("ACTIVE")
+  expiresAt            DateTime?
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user                 User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+  invocations          ToolInvocation[]
+
+  @@unique([userId, provider, externalAccountId])
+  @@index([userId, provider])
+}
+
+model IntegrationState {
+  id               String    @id @default(cuid())
+  stateHash        String    @unique
+  userId           String
+  provider         String
+  redirectUri      String    @db.VarChar(512)
+  codeVerifierHash String?   @db.VarChar(128)
+  expiresAt        DateTime
+  consumedAt       DateTime?
+  createdAt        DateTime  @default(now())
+
+  user             User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@index([userId, provider])
+  @@index([expiresAt])
+}
+
+model ToolInvocation {
+  id                   String    @id @default(cuid())
+  userId               String
+  connectionId         String?
+  conversationId       String?
+  toolId               String
+  status               String    @default("PENDING_APPROVAL")
+  idempotencyKey       String    @unique
+  approvalId           String?
+  redactedInputSummary String?   @db.Text
+  resultSummary        String?   @db.Text
+  errorMessage         String?   @db.Text
+  createdAt            DateTime  @default(now())
+  updatedAt            DateTime  @updatedAt
+
+  user                 User                   @relation(fields: [userId], references: [id], onDelete: Cascade)
+  connection           IntegrationConnection? @relation(fields: [connectionId], references: [id], onDelete: SetNull)
+  approval             ToolApproval?
+
+  @@index([userId, toolId])
+  @@index([status])
+}
+
+model ToolApproval {
+  id             String    @id @default(cuid())
+  invocationId   String    @unique
+  actionDigest   String
+  status         String    @default("PENDING")
+  approvedBy     String?
+  resolvedAt     DateTime?
+  expiresAt      DateTime
+  createdAt      DateTime  @default(now())
+
+  invocation     ToolInvocation @relation(fields: [invocationId], references: [id], onDelete: Cascade)
+
+  @@index([status, expiresAt])
 }

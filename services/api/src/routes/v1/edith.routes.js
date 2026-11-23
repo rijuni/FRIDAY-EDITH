@@ -10,6 +10,9 @@ import { validate } from '../../middleware/validate.js';
 import { auditService } from '../../modules/audit/audit.service.js';
 import { prisma } from '../../repositories/prisma.js';
 import { logger } from '../../utils/logger.js';
+import { githubAdapter } from '../../modules/integrations/adapters/github.adapter.js';
+import { getValidAccessToken } from '../../modules/integrations/integration.service.js';
+import { sanitizeToolOutput } from '../../modules/integrations/policyGateway.js';
 
 export const edithRouter = Router();
 const MAX_INTERNAL_RESPONSE_BYTES = 8 * 1024 * 1024;
@@ -786,6 +789,97 @@ edithRouter.get('/projects', authenticate, async (req, res) => {
     return res.status(500).json({
       status: 'error', statusCode: 500, errorCode: 'PROJECTS_UNAVAILABLE',
       message: 'Unable to load your Edith workspaces.'
+    });
+  }
+});
+
+edithRouter.get('/integrations/github/status', authenticate, async (req, res) => {
+  try {
+    const connection = await prisma.integrationConnection.findFirst({
+      where: { userId: req.user.id, provider: 'github', status: 'ACTIVE' },
+      select: { id: true, displayName: true, scopes: true, expiresAt: true, updatedAt: true }
+    });
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        connected: Boolean(connection),
+        connection: connection ? {
+          id: connection.id,
+          displayName: connection.displayName,
+          scopes: connection.scopes.split(/\s+/).filter(Boolean),
+          expiresAt: connection.expiresAt,
+          updatedAt: connection.updatedAt
+        } : null
+      }
+    });
+  } catch (error) {
+    logger.error({ err: error?.message, requestId: req.id }, 'Unable to get GitHub status');
+    return res.status(500).json({ status: 'error', statusCode: 500, message: 'Unable to check GitHub integration status.' });
+  }
+});
+
+const githubContextSchema = {
+  body: z.object({
+    owner: z.string().trim().min(1).max(100),
+    repo: z.string().trim().min(1).max(100),
+    pullNumber: z.number().int().positive().optional(),
+    ref: z.string().trim().max(120).optional()
+  }).strict()
+};
+
+edithRouter.post('/integrations/github/context', authenticate, validate(githubContextSchema), async (req, res) => {
+  try {
+    const { owner, repo, pullNumber, ref } = req.body;
+    const connection = await prisma.integrationConnection.findFirst({
+      where: { userId: req.user.id, provider: 'github', status: 'ACTIVE' }
+    });
+    if (!connection) {
+      return res.status(403).json({
+        status: 'fail',
+        statusCode: 403,
+        errorCode: 'GITHUB_INTEGRATION_REQUIRED',
+        message: 'A connected GitHub account with repo:read scope is required to fetch repository context.'
+      });
+    }
+
+    const accessToken = await getValidAccessToken({ userId: req.user.id, connectionId: connection.id });
+    const repoInfo = await githubAdapter.getRepository({ owner, repo, accessToken });
+
+    let pullRequest = null;
+    if (pullNumber) {
+      pullRequest = await githubAdapter.getPullRequest({ owner, repo, pullNumber, accessToken });
+    }
+
+    let ciStatus = null;
+    if (ref) {
+      ciStatus = await githubAdapter.getCiStatus({ owner, repo, ref, accessToken });
+    }
+
+    const rawPayload = {
+      repository: repoInfo,
+      pullRequest,
+      ciStatus
+    };
+
+    const sanitized = sanitizeToolOutput({
+      toolId: 'github_context',
+      result: rawPayload,
+      sourceLabel: `GitHub (${owner}/${repo})`
+    });
+
+    return res.status(200).json({
+      status: 'success',
+      data: {
+        context: sanitized
+      }
+    });
+  } catch (error) {
+    logger.error({ err: error?.message, requestId: req.id }, 'Unable to fetch GitHub context');
+    return res.status(error.statusCode || 502).json({
+      status: 'error',
+      statusCode: error.statusCode || 502,
+      errorCode: error.errorCode || 'GITHUB_CONTEXT_FAILED',
+      message: error.message || 'Failed to fetch GitHub context.'
     });
   }
 });

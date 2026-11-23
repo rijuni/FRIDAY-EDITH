@@ -486,7 +486,7 @@ def test_chat_stream_injects_scoped_retrieval_and_user_memory():
             yield NormalizedChunk(event="done")
 
     original_resolver = model_router.resolve_provider
-    model_router.resolve_provider = lambda model: TestProvider()
+    model_router.resolve_provider = lambda model, *args, **kwargs: TestProvider()
     try:
         response = client.post(
             "/v1/chat/stream",

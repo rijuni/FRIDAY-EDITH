@@ -52,7 +52,13 @@ async def stream_chat(
     req: ChatStreamRequest,
     user_id: str = Depends(verify_internal_caller)
 ):
-    provider = model_router.resolve_provider(req.model)
+    forwarded_api_key = request.headers.get("x-provider-api-key") or req.api_key
+    import inspect
+    sig = inspect.signature(model_router.resolve_provider)
+    if "api_key" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        provider = model_router.resolve_provider(req.model, api_key=forwarded_api_key)
+    else:
+        provider = model_router.resolve_provider(req.model)
     raw_messages = [{"role": m.role, "content": m.content} for m in req.messages]
     compacted_messages = context_manager.prune_and_assemble(
         messages=raw_messages,

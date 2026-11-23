@@ -1,10 +1,16 @@
 import React, { useEffect, useState } from 'react';
-import { X, Settings, User, Sliders, Shield, CheckCircle2, AlertCircle, LogOut, Loader2, RefreshCw } from 'lucide-react';
+import { X, Settings, User, Sliders, Shield, CheckCircle2, AlertCircle, LogOut, Loader2, RefreshCw, Key, Trash2, Eye, EyeOff } from 'lucide-react';
 import { apiFetch, safeParseJson } from '../../../lib/apiClient.js';
 import { useAuthStore } from '../../../stores/authStore.js';
 import { useFridayStore } from '../../../stores/fridayStore.js';
 
 const DEFAULT_SYSTEM_PROMPT = 'You are F.R.I.D.A.Y., a high-intelligence AI assistant.';
+
+const SUPPORTED_PROVIDERS = [
+  { id: 'anthropic', label: 'Anthropic (Claude)', placeholder: 'sk-ant-api03-...' },
+  { id: 'openai', label: 'OpenAI (GPT / Reasoning)', placeholder: 'sk-proj-...' },
+  { id: 'gemini', label: 'Google Gemini', placeholder: 'AIzaSy...' }
+];
 
 export function FridaySettingsModal({ isOpen, onClose }) {
   const { user, setUser } = useAuthStore();
@@ -19,14 +25,40 @@ export function FridaySettingsModal({ isOpen, onClose }) {
   const [statusMsg, setStatusMsg] = useState(null);
   const [errorMsg, setErrorMsg] = useState(null);
 
+  // Secret Vault Provider Keys state
+  const [providerKeys, setProviderKeys] = useState([]);
+  const [keyInputs, setKeyInputs] = useState({});
+  const [showKeyInput, setShowKeyInput] = useState({});
+  const [revealKey, setRevealKey] = useState({});
+  const [savingProvider, setSavingProvider] = useState(null);
+  const [deletingProvider, setDeletingProvider] = useState(null);
+
+  const fetchProviderKeys = async () => {
+    try {
+      const res = await apiFetch('/v1/auth/provider-keys');
+      const payload = await safeParseJson(res);
+      if (res.ok && payload?.data?.keys) {
+        setProviderKeys(payload.data.keys);
+      }
+    } catch {
+      // Ignore vault listing network failure on background sync
+    }
+  };
+
   useEffect(() => {
-    if (!isOpen) return;
+    if (!isOpen) {
+      setKeyInputs({});
+      setShowKeyInput({});
+      setRevealKey({});
+      return;
+    }
     setDisplayName(user?.name || '');
     setModelChoice(selectedModel || 'claude-3-7-sonnet');
     setPromptText(systemPrompt || DEFAULT_SYSTEM_PROMPT);
     setTempValue(temperature ?? 0.7);
     setStatusMsg(null);
     setErrorMsg(null);
+    fetchProviderKeys();
   }, [isOpen, user?.name, selectedModel, systemPrompt, temperature]);
 
   useEffect(() => {
@@ -43,6 +75,71 @@ export function FridaySettingsModal({ isOpen, onClose }) {
   }, [isOpen, onClose]);
 
   if (!isOpen) return null;
+
+  const handleSaveProviderKey = async (provider) => {
+    const rawInput = (keyInputs[provider] || '').trim();
+    if (!rawInput || rawInput.length < 8) {
+      setErrorMsg(`Please enter a valid API key for ${provider}.`);
+      return;
+    }
+    setErrorMsg(null);
+    setStatusMsg(null);
+    setSavingProvider(provider);
+
+    try {
+      const res = await apiFetch('/v1/auth/provider-keys', {
+        method: 'POST',
+        body: JSON.stringify({ provider, apiKey: rawInput })
+      });
+      const payload = await safeParseJson(res);
+      if (!res.ok || !payload?.data?.key) {
+        throw new Error(payload?.message || `Failed to save ${provider} API key.`);
+      }
+
+      // Zero-out input state immediately: never leak in memory
+      setKeyInputs((prev) => ({ ...prev, [provider]: '' }));
+      setShowKeyInput((prev) => ({ ...prev, [provider]: false }));
+      await fetchProviderKeys();
+      fetchModels();
+      setStatusMsg(`${provider.toUpperCase()} API key encrypted with AES-256-GCM and saved to your personal vault.`);
+    } catch (err) {
+      setErrorMsg(err?.message || `Failed to save ${provider} API key.`);
+    } finally {
+      setSavingProvider(null);
+    }
+  };
+
+  const handleDeleteProviderKey = async (provider) => {
+    setErrorMsg(null);
+    setStatusMsg(null);
+    setDeletingProvider(provider);
+
+    try {
+      const res = await apiFetch(`/v1/auth/provider-keys/${encodeURIComponent(provider)}`, {
+        method: 'DELETE'
+      });
+      const payload = await safeParseJson(res);
+      if (!res.ok) {
+        throw new Error(payload?.message || `Failed to remove ${provider} API key.`);
+      }
+
+      await fetchProviderKeys();
+      fetchModels();
+      setStatusMsg(`${provider.toUpperCase()} API key removed from vault.`);
+    } catch (err) {
+      setErrorMsg(err?.message || `Failed to delete ${provider} API key.`);
+    } finally {
+      setDeletingProvider(null);
+    }
+  };
+
+  const toggleShowInput = (provider) => {
+    setShowKeyInput((prev) => ({ ...prev, [provider]: !prev[provider] }));
+  };
+
+  const toggleReveal = (provider) => {
+    setRevealKey((prev) => ({ ...prev, [provider]: !prev[provider] }));
+  };
 
   const handleSave = async (e) => {
     e.preventDefault();
@@ -209,7 +306,9 @@ export function FridaySettingsModal({ isOpen, onClose }) {
                   className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/15 text-slate-100 focus:outline-none focus:border-purple-400 cursor-pointer"
                 >
                   {availableModels.length ? availableModels.map((model) => (
-                    <option key={model.id} value={model.id} className="bg-[#120d24]">{model.label}</option>
+                    <option key={model.id} value={model.id} className="bg-[#120d24]">
+                      {model.label} {model.configuredBy === 'user_vault' ? '🔒 (Personal Vault)' : ''}
+                    </option>
                   )) : <option value={modelChoice} disabled className="bg-[#120d24]">
                     {providerMode === 'auth_required'
                       ? 'Sign in again to load models'
@@ -264,6 +363,108 @@ export function FridaySettingsModal({ isOpen, onClose }) {
                 placeholder={DEFAULT_SYSTEM_PROMPT}
                 className="w-full px-3 py-2 rounded-xl bg-black/30 border border-white/15 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-400 resize-none"
               />
+            </div>
+          </div>
+
+          {/* AI Provider Keys (Secret Vault) Section */}
+          <div className="p-4 rounded-2xl frosted-glass-card space-y-3">
+            <div className="flex items-center justify-between">
+              <div className="flex items-center gap-2 text-purple-300 font-semibold">
+                <Key className="w-3.5 h-3.5" />
+                <span>AI Provider Keys (Secret Vault)</span>
+              </div>
+              <span className="text-[10px] text-emerald-400 font-mono bg-emerald-500/10 border border-emerald-400/20 px-2 py-0.5 rounded-full">
+                AES-256-GCM
+              </span>
+            </div>
+            <p className="text-[11px] text-slate-400">
+              Provide your own API keys. Keys are encrypted at rest with envelope encryption and never stored in plaintext or browser memory.
+            </p>
+
+            <div className="space-y-3 pt-1">
+              {SUPPORTED_PROVIDERS.map((prov) => {
+                const configuredKey = providerKeys.find((k) => k.provider.toLowerCase() === prov.id);
+                const isConfigured = Boolean(configuredKey);
+                const isShowingInput = showKeyInput[prov.id] || !isConfigured;
+                const isSavingThis = savingProvider === prov.id;
+                const isDeletingThis = deletingProvider === prov.id;
+
+                return (
+                  <div key={prov.id} className="p-3 rounded-xl bg-black/25 border border-white/10 space-y-2">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-2">
+                        <span className="font-medium text-slate-200">{prov.label}</span>
+                        {isConfigured ? (
+                          <span className="inline-flex items-center gap-1 text-[10px] text-emerald-300 bg-emerald-500/15 border border-emerald-400/30 px-2 py-0.5 rounded-md font-mono">
+                            <CheckCircle2 className="w-3 h-3 text-emerald-400" />
+                            {configuredKey.maskedKey}
+                          </span>
+                        ) : (
+                          <span className="text-[10px] text-slate-400 bg-white/5 border border-white/10 px-2 py-0.5 rounded-md">
+                            Not Configured
+                          </span>
+                        )}
+                      </div>
+
+                      <div className="flex items-center gap-1.5">
+                        {isConfigured && (
+                          <button
+                            type="button"
+                            onClick={() => handleDeleteProviderKey(prov.id)}
+                            disabled={isDeletingThis}
+                            className="p-1 rounded-lg text-slate-400 hover:text-red-300 hover:bg-red-500/20 transition-colors cursor-pointer disabled:opacity-50"
+                            title={`Remove ${prov.label} key`}
+                          >
+                            {isDeletingThis ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Trash2 className="w-3.5 h-3.5" />}
+                          </button>
+                        )}
+                        {isConfigured && (
+                          <button
+                            type="button"
+                            onClick={() => toggleShowInput(prov.id)}
+                            className="text-[11px] text-purple-300 hover:text-purple-200 underline cursor-pointer"
+                          >
+                            {showKeyInput[prov.id] ? 'Cancel' : 'Update'}
+                          </button>
+                        )}
+                      </div>
+                    </div>
+
+                    {isShowingInput && (
+                      <div className="flex items-center gap-2 pt-1">
+                        <div className="relative flex-1">
+                          <input
+                            type={revealKey[prov.id] ? 'text' : 'password'}
+                            value={keyInputs[prov.id] || ''}
+                            onChange={(e) => setKeyInputs((prev) => ({ ...prev, [prov.id]: e.target.value }))}
+                            placeholder={prov.placeholder}
+                            autoComplete="off"
+                            spellCheck={false}
+                            className="w-full px-3 py-1.5 pr-8 rounded-xl bg-black/40 border border-white/15 text-slate-100 placeholder-slate-500 focus:outline-none focus:border-purple-400 text-xs font-mono"
+                          />
+                          <button
+                            type="button"
+                            onClick={() => toggleReveal(prov.id)}
+                            className="absolute right-2 top-1/2 -translate-y-1/2 text-slate-400 hover:text-slate-200"
+                            tabIndex={-1}
+                          >
+                            {revealKey[prov.id] ? <EyeOff className="w-3.5 h-3.5" /> : <Eye className="w-3.5 h-3.5" />}
+                          </button>
+                        </div>
+                        <button
+                          type="button"
+                          onClick={() => handleSaveProviderKey(prov.id)}
+                          disabled={isSavingThis || !(keyInputs[prov.id] || '').trim()}
+                          className="flex items-center gap-1 px-3 py-1.5 rounded-xl bg-purple-600/80 hover:bg-purple-600 text-white font-medium cursor-pointer disabled:opacity-40 transition-colors text-xs shrink-0"
+                        >
+                          {isSavingThis ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Key className="w-3.5 h-3.5" />}
+                          <span>Save Key</span>
+                        </button>
+                      </div>
+                    )}
+                  </div>
+                );
+              })}
             </div>
           </div>
 

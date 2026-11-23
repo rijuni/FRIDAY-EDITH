@@ -10,13 +10,15 @@ let modelRequestSequence = 0;
 let conversationFetchSequence = 0;
 
 function resolveAvailableModel(modelId, models) {
-  if (models.some((model) => model.id === modelId)) return modelId;
+  const selectable = models.filter((model) => model.isAvailable !== false);
+  const pool = selectable.length > 0 ? selectable : models;
+  if (pool.some((model) => model.id === modelId)) return modelId;
   const legacyProvider = LEGACY_MODEL_PROVIDERS[modelId];
   if (legacyProvider) {
-    const matchingProvider = models.find((model) => model.label?.startsWith(`${legacyProvider} ·`));
+    const matchingProvider = pool.find((model) => model.label?.startsWith(`${legacyProvider} ·`));
     if (matchingProvider) return matchingProvider.id;
   }
-  return models[0]?.id || modelId;
+  return pool[0]?.id || modelId;
 }
 
 const INITIAL_STATE = {

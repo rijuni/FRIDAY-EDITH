@@ -2,6 +2,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { app } from '../app.js';
 import { prisma } from '../repositories/prisma.js';
+import { config } from '../config/index.js';
 import { encryptSecret, decryptSecret, maskSecret, deriveSecretKey } from '../security/crypto.js';
 import { providerKeyService } from '../modules/secrets/providerKey.service.js';
 
@@ -248,6 +249,124 @@ test('Secret Vault: REST API endpoints for provider keys (/v1/auth/provider-keys
     assert.equal(listEmptyRes.status, 200);
     const listEmptyBody = await listEmptyRes.json();
     assert.equal(listEmptyBody.data.keys.length, 0);
+  } finally {
+    server.close();
+    if (userId) {
+      await prisma.providerKey.deleteMany({ where: { userId } });
+      await prisma.auditLog.deleteMany({ where: { userId } });
+      await prisma.user.deleteMany({ where: { id: userId } });
+    }
+  }
+});
+
+test('Acceptance 6-03: Rotating JWT_SECRET does not affect or invalidate vaulted provider keys', async () => {
+  const nonce = Date.now();
+  const user = await prisma.user.create({
+    data: {
+      email: `vault_jwt_rotation_${nonce}@stark.corp`,
+      name: 'Vault Rotation Tester',
+      passwordHash: 'dummy_hash',
+      role: 'DEVELOPER'
+    }
+  });
+
+  const rawKey = 'sk-ant-live-secret-key-will-survive-jwt-rotation-99999';
+
+  try {
+    // 1. Store key with current configuration
+    await providerKeyService.setProviderKey({
+      userId: user.id,
+      provider: 'anthropic',
+      apiKey: rawKey
+    });
+
+    // 2. Verify key can be decrypted initially
+    const initialDecrypted = await providerKeyService.getDecryptedKey({
+      userId: user.id,
+      provider: 'anthropic'
+    });
+    assert.equal(initialDecrypted, rawKey);
+
+    // 3. Rotate JWT_SECRET to a completely new value
+    const originalJwtSecret = config.JWT_SECRET;
+    try {
+      config.JWT_SECRET = 'completely_new_rotated_jwt_secret_value_for_testing_only!!';
+
+      // 4. Attempt to decrypt key after JWT_SECRET rotation
+      const afterRotationDecrypted = await providerKeyService.getDecryptedKey({
+        userId: user.id,
+        provider: 'anthropic'
+      });
+      assert.equal(
+        afterRotationDecrypted,
+        rawKey,
+        'Decryption must remain valid after JWT_SECRET rotation because derivation uses ENCRYPTION_MASTER_KEY'
+      );
+    } finally {
+      config.JWT_SECRET = originalJwtSecret;
+    }
+  } finally {
+    await prisma.providerKey.deleteMany({ where: { userId: user.id } });
+    await prisma.auditLog.deleteMany({ where: { userId: user.id } });
+    await prisma.user.deleteMany({ where: { id: user.id } });
+  }
+});
+
+test('Acceptance 6-02: Vault-only model discovery marks models available (configuredBy: user_vault)', async () => {
+  const server = app.listen(0);
+  const port = server.address().port;
+  const baseUrl = `http://localhost:${port}/v1`;
+  const email = `vault_discovery_${Date.now()}@stark.corp`;
+  let userId;
+
+  try {
+    // 1. Register & login
+    const regRes = await fetch(`${baseUrl}/auth/register`, {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ email, password: 'StrongPassword123!', name: 'Vault Discovery User' })
+    });
+    assert.equal(regRes.status, 201);
+    const regBody = await regRes.json();
+    userId = regBody.data.user.id;
+
+    const cookieMap = extractCookieMap(regRes);
+    const csrfToken = cookieMap.friday_csrf_token;
+    const cookieHeader = buildCookieHeader(cookieMap);
+
+    const authHeaders = {
+      'Content-Type': 'application/json',
+      'Cookie': cookieHeader,
+      'X-CSRF-Token': csrfToken
+    };
+
+    // 2. Save Anthropic key into user's vault
+    const saveRes = await fetch(`${baseUrl}/auth/provider-keys`, {
+      method: 'POST',
+      headers: authHeaders,
+      body: JSON.stringify({
+        provider: 'anthropic',
+        apiKey: 'sk-ant-api03-user-vault-discovery-key-8888',
+        isDefault: true
+      })
+    });
+    assert.equal(saveRes.status, 201);
+
+    // 3. Query GET /v1/friday/models
+    const modelsRes = await fetch(`${baseUrl}/friday/models`, {
+      method: 'GET',
+      headers: authHeaders
+    });
+    assert.equal(modelsRes.status, 200);
+    const modelsBody = await modelsRes.json();
+    assert.ok(modelsBody?.data?.models, 'Models array must be returned');
+
+    // 4. Verify that claude model is marked isAvailable: true and configuredBy: 'user_vault'
+    const claudeModel = modelsBody.data.models.find((m) => m.id === 'claude-3-7-sonnet');
+    assert.ok(claudeModel, 'Claude 3.7 model must be present');
+    assert.equal(claudeModel.isAvailable, true, 'Claude model must be marked available for user with vaulted key');
+    assert.equal(claudeModel.configuredBy, 'user_vault', 'Claude model configuredBy must be user_vault');
+    assert.ok(modelsBody.data.user_configured_providers.includes('anthropic'), 'user_configured_providers must include anthropic');
   } finally {
     server.close();
     if (userId) {
