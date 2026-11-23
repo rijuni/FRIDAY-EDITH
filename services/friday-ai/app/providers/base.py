@@ -32,7 +32,8 @@ class BaseProvider(ABC):
         messages: List[Dict[str, str]],
         system_prompt: str = "",
         temperature: float = 0.7,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        api_key: Any = None
     ) -> AsyncGenerator[NormalizedChunk, None]:
         """Yields standardized streaming events."""
         pass

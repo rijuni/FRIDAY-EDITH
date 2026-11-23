@@ -1,5 +1,5 @@
 import asyncio
-from typing import AsyncGenerator, Dict, List
+from typing import Any, AsyncGenerator, Dict, List, Optional
 from app.providers.base import BaseProvider, NormalizedChunk
 
 
@@ -19,7 +19,8 @@ class MockProvider(BaseProvider):
         messages: List[Dict[str, str]],
         system_prompt: str = "",
         temperature: float = 0.7,
-        max_tokens: int = 4096
+        max_tokens: int = 4096,
+        api_key: Any = None
     ) -> AsyncGenerator[NormalizedChunk, None]:
         user_input = messages[-1]["content"] if messages else ""
         base_meta = {"is_mock": True, "provider": self.model_id}

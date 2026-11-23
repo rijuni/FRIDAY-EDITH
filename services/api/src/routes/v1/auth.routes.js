@@ -5,6 +5,7 @@ import { authLimiter } from '../../middleware/rateLimit.js';
 import { authenticate } from '../../middleware/authenticate.js';
 import { authorize } from '../../middleware/authorize.js';
 import * as authController from '../../controllers/auth.controller.js';
+import * as providerKeyController from '../../controllers/providerKey.controller.js';
 
 export const authRouter = Router();
 
@@ -69,4 +70,30 @@ authRouter.patch(
   validate(assignRoleSchema),
   authController.assignRole
 );
+
+const setProviderKeySchema = {
+  body: z
+    .object({
+      provider: z.enum(['anthropic', 'gemini', 'openai', 'custom']),
+      apiKey: z.string().trim().min(8).max(500),
+      isDefault: z.boolean().optional().default(false)
+    })
+    .strict()
+};
+
+const deleteProviderKeySchema = {
+  params: z.object({
+    provider: z.enum(['anthropic', 'gemini', 'openai', 'custom'])
+  })
+};
+
+authRouter.get('/provider-keys', authenticate, providerKeyController.listKeys);
+authRouter.post('/provider-keys', authenticate, validate(setProviderKeySchema), providerKeyController.setKey);
+authRouter.delete(
+  '/provider-keys/:provider',
+  authenticate,
+  validate(deleteProviderKeySchema),
+  providerKeyController.deleteKey
+);
+
 

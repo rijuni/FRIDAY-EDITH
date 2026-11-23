@@ -78,8 +78,9 @@ class HttpProvider(BaseProvider):
 class OpenAIProvider(HttpProvider):
     provider_name = "openai"
 
-    async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096):
-        if not settings.OPENAI_API_KEY:
+    async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096, api_key=None):
+        effective_key = api_key or settings.OPENAI_API_KEY
+        if not effective_key:
             raise ProviderConfigurationException(self.provider_name)
         turns, instructions = _messages_for_provider(messages)
         full_instructions = "\n\n".join([system_prompt, *instructions]).strip()
@@ -92,7 +93,7 @@ class OpenAIProvider(HttpProvider):
         }
         client, response = await self._open_stream(
             "https://api.openai.com/v1/chat/completions",
-            {"Authorization": f"Bearer {settings.OPENAI_API_KEY}", "Content-Type": "application/json"},
+            {"Authorization": f"Bearer {effective_key}", "Content-Type": "application/json"},
             payload,
         )
         try:
@@ -115,8 +116,9 @@ class OpenAIProvider(HttpProvider):
 class AnthropicProvider(HttpProvider):
     provider_name = "anthropic"
 
-    async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096):
-        if not settings.ANTHROPIC_API_KEY:
+    async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096, api_key=None):
+        effective_key = api_key or settings.ANTHROPIC_API_KEY
+        if not effective_key:
             raise ProviderConfigurationException(self.provider_name)
         turns, instructions = _messages_for_provider(messages)
         full_instructions = "\n\n".join([system_prompt, *instructions]).strip()
@@ -132,7 +134,7 @@ class AnthropicProvider(HttpProvider):
         client, response = await self._open_stream(
             "https://api.anthropic.com/v1/messages",
             {
-                "x-api-key": settings.ANTHROPIC_API_KEY,
+                "x-api-key": effective_key,
                 "anthropic-version": "2023-06-01",
                 "content-type": "application/json",
             },
@@ -166,8 +168,9 @@ class GeminiProvider(HttpProvider):
         # the service still emits its normalized event stream after the response.
         return ProviderCapabilities(streaming=False, is_mock=False)
 
-    async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096):
-        if not settings.GEMINI_API_KEY:
+    async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096, api_key=None):
+        effective_key = api_key or settings.GEMINI_API_KEY
+        if not effective_key:
             raise ProviderConfigurationException(self.provider_name)
         turns, instructions = _messages_for_provider(messages)
         full_instructions = "\n\n".join([system_prompt, *instructions]).strip()
@@ -187,7 +190,7 @@ class GeminiProvider(HttpProvider):
             ) as client:
                 response = await client.post(
                     url,
-                    headers={"x-goog-api-key": settings.GEMINI_API_KEY, "content-type": "application/json"},
+                    headers={"x-goog-api-key": effective_key, "content-type": "application/json"},
                     json=payload,
                 )
         except asyncio.CancelledError:

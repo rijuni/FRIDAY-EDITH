@@ -26,6 +26,7 @@ const envSchema = z.object({
 
   // Auth & Secrets
   JWT_SECRET: z.string().min(16).default(DEFAULT_DEV_JWT_SECRET),
+  ENCRYPTION_MASTER_KEY: z.string().min(16).optional(),
   JWT_ISSUER: z.string().default('friday-edith-api'),
   JWT_AUDIENCE: z.string().default('friday-edith-clients'),
   JWT_EXPIRES_IN: z.string().default('15m'),

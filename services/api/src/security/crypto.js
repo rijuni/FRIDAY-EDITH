@@ -157,3 +157,97 @@ export function verifyToken(token, expectedType) {
   return decoded;
 }
 
+const VAULT_CIPHER_ALGORITHM = 'aes-256-gcm';
+const VAULT_SALT_BYTES = 16;
+const VAULT_IV_BYTES = 12; // 96-bit nonce standard for GCM
+const VAULT_KEY_BYTES = 32; // 256-bit key
+const VAULT_HKDF_INFO = Buffer.from('friday-edith-secret-vault', 'utf8');
+
+/**
+ * Derives a 256-bit key using HKDF-SHA256 from the master key and a salt.
+ * @param {Buffer} salt
+ * @param {string} [customKey]
+ * @returns {Buffer}
+ */
+export function deriveSecretKey(salt, customKey = null) {
+  const masterKey = customKey || config.ENCRYPTION_MASTER_KEY || config.JWT_SECRET;
+  return crypto.hkdfSync('sha256', Buffer.from(masterKey, 'utf8'), salt, VAULT_HKDF_INFO, VAULT_KEY_BYTES);
+}
+
+/**
+ * Encrypts a plaintext secret into an envelope string format:
+ * "v1:<salt_hex>:<iv_hex>:<auth_tag_hex>:<ciphertext_hex>"
+ * Uses AES-256-GCM with authenticated tag to ensure confidentiality and integrity.
+ * @param {string} plaintext
+ * @param {string} [customKey]
+ * @returns {string}
+ */
+export function encryptSecret(plaintext, customKey = null) {
+  if (typeof plaintext !== 'string' || !plaintext) {
+    throw new Error('Plaintext secret must be a non-empty string');
+  }
+  const salt = crypto.randomBytes(VAULT_SALT_BYTES);
+  const iv = crypto.randomBytes(VAULT_IV_BYTES);
+  const derivedKey = deriveSecretKey(salt, customKey);
+
+  const cipher = crypto.createCipheriv(VAULT_CIPHER_ALGORITHM, derivedKey, iv);
+  const ciphertext = Buffer.concat([cipher.update(plaintext, 'utf8'), cipher.final()]);
+  const authTag = cipher.getAuthTag();
+
+  return `v1:${salt.toString('hex')}:${iv.toString('hex')}:${authTag.toString('hex')}:${ciphertext.toString('hex')}`;
+}
+
+/**
+ * Decrypts a secret envelope string created by encryptSecret.
+ * Verifies authenticity tag; fails closed if tampered with.
+ * @param {string} envelope
+ * @param {string} [customKey]
+ * @returns {string}
+ */
+export function decryptSecret(envelope, customKey = null) {
+  if (typeof envelope !== 'string' || !envelope.startsWith('v1:')) {
+    throw new Error('Invalid secret envelope format: missing v1 header');
+  }
+  const parts = envelope.split(':');
+  if (parts.length !== 5) {
+    throw new Error('Invalid secret envelope format: corrupt segments');
+  }
+  const [, saltHex, ivHex, authTagHex, ciphertextHex] = parts;
+  const salt = Buffer.from(saltHex, 'hex');
+  const iv = Buffer.from(ivHex, 'hex');
+  const authTag = Buffer.from(authTagHex, 'hex');
+  const ciphertext = Buffer.from(ciphertextHex, 'hex');
+
+  if (salt.length !== VAULT_SALT_BYTES || iv.length !== VAULT_IV_BYTES || authTag.length !== 16) {
+    throw new Error('Invalid secret envelope format: corrupt cryptographic parameters');
+  }
+
+  const derivedKey = deriveSecretKey(salt, customKey);
+  const decipher = crypto.createDecipheriv(VAULT_CIPHER_ALGORITHM, derivedKey, iv);
+  decipher.setAuthTag(authTag);
+
+  try {
+    const decrypted = Buffer.concat([decipher.update(ciphertext), decipher.final()]);
+    return decrypted.toString('utf8');
+  } catch (err) {
+    const error = new Error('Secret decryption failed: authentication tag verification failed or key mismatch');
+    error.statusCode = 400;
+    throw error;
+  }
+}
+
+/**
+ * Masks a sensitive secret for safe client-side listing / auditing.
+ * Never displays more than the trailing 4 characters.
+ * @param {string} secret
+ * @returns {string}
+ */
+export function maskSecret(secret) {
+  if (typeof secret !== 'string' || !secret) return '***';
+  if (secret.length <= 8) return '********';
+  const prefix = secret.startsWith('sk-') ? 'sk-...' : '...';
+  const suffix = secret.slice(-4);
+  return `${prefix}${suffix}`;
+}
+
+

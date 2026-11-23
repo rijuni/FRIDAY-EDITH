@@ -3,6 +3,7 @@ import { prisma } from '../repositories/prisma.js';
 import { config } from '../config/index.js';
 import { assertOwnership } from '../middleware/authorize.js';
 import { auditService } from '../modules/audit/audit.service.js';
+import { providerKeyService } from '../modules/secrets/providerKey.service.js';
 import { logger } from '../utils/logger.js';
 
 const SUPPORTED_DOCUMENT_MIME_TYPES = new Set([
@@ -1007,7 +1008,27 @@ export async function sendMessage(req, res, next) {
       ...(typeof temperature === 'number' ? { temperature } : {})
     };
 
-    // 4. Call internal Friday AI SSE endpoint with service credentials & correlation ID
+    // 4. Resolve provider-specific API key (User Vault -> Server Env fallback)
+    const effectiveModel = model || conversation.modelPreference || 'claude-3-7-sonnet';
+    const normModel = effectiveModel.toLowerCase();
+    const targetProvider = normModel.startsWith('gemini') || normModel.includes('google')
+      ? 'gemini'
+      : normModel.startsWith('gpt') || normModel.includes('openai') || normModel.includes('o1') || normModel.includes('o3')
+        ? 'openai'
+        : 'anthropic';
+
+    let resolvedKey = null;
+    try {
+      const keyInfo = await providerKeyService.resolveActiveKey({
+        userId: req.user.id,
+        provider: targetProvider
+      });
+      if (keyInfo?.key) resolvedKey = keyInfo.key;
+    } catch {
+      // Fallback silently if vault lookup fails
+    }
+
+    // Call internal Friday AI SSE endpoint with service credentials & correlation ID
     const aiResponse = await fetch(`${getFridayAiUrl()}/v1/chat/stream`, {
       method: 'POST',
       signal: abortController.signal,
@@ -1015,7 +1036,8 @@ export async function sendMessage(req, res, next) {
         'Content-Type': 'application/json',
         'X-Internal-Service-Token': config.INTERNAL_SERVICE_SECRET,
         'X-User-Id': req.user.id,
-        'X-Request-Id': req.id || ''
+        'X-Request-Id': req.id || '',
+        ...(resolvedKey ? { 'X-Provider-Api-Key': resolvedKey } : {})
       },
       body: JSON.stringify(aiPayload)
     });

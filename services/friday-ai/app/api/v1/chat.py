@@ -32,6 +32,7 @@ class ChatStreamRequest(BaseModel):
     max_tokens: int = Field(4096, ge=1, le=32000)
     knowledge_chunks: List[Dict[str, Any]] = Field(default_factory=list, max_length=200)
     memories: List[Dict[str, str]] = Field(default_factory=list, max_length=50)
+    api_key: Optional[str] = Field(None, max_length=500)
 
 
 @router.get("/models")
@@ -109,7 +110,14 @@ async def stream_chat(
         system_prompt=effective_system_prompt,
     )
 
+    forwarded_api_key = request.headers.get("x-provider-api-key") or req.api_key
     logger.debug(f"Starting stream for user={user_id} model={provider.model_id} turns={len(compacted_messages)}")
+
+    import inspect
+    sig = inspect.signature(provider.generate_stream)
+    stream_kwargs = {}
+    if "api_key" in sig.parameters or any(p.kind == inspect.Parameter.VAR_KEYWORD for p in sig.parameters.values()):
+        stream_kwargs["api_key"] = forwarded_api_key
 
     async def event_generator():
         try:
@@ -117,7 +125,8 @@ async def stream_chat(
                 messages=compacted_messages,
                 system_prompt=effective_system_prompt,
                 temperature=req.temperature,
-                max_tokens=req.max_tokens
+                max_tokens=req.max_tokens,
+                **stream_kwargs
             ):
                 if await request.is_disconnected():
                     logger.info(f"Client disconnected mid-stream user={user_id}")

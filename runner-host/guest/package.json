@@ -1,0 +1,11 @@
+{
+  "name": "@friday-edith/guest-runner-daemon",
+  "version": "2.1.0",
+  "type": "module",
+  "description": "E.D.I.T.H. Phase 5 Hyper-V Guest Runner Daemon (Port 9001)",
+  "main": "runner-daemon.js",
+  "scripts": {
+    "start": "node runner-daemon.js",
+    "test": "node --test tests/*.test.js"
+  }
+}

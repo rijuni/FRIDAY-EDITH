@@ -1,0 +1,75 @@
+# ==============================================================================
+# F.R.I.D.A.Y. & E.D.I.T.H. Caddyfile (Production Automatic HTTPS Reverse Proxy)
+# Modern zero-config TLS reverse proxy with 1 GiB upload streaming & SSE support.
+# ==============================================================================
+
+{
+    # Global options
+    auto_https off # Set to 'on' or omit when configuring a real domain
+    admin off
+
+    servers {
+        timeouts {
+            read_body   900s
+            read_header 30s
+            write       900s
+            idle        120s
+        }
+        max_header_size 1MB
+    }
+}
+
+:80 {
+    # Logging
+    log {
+        output file /var/log/caddy/access.log {
+            roll_size 50mb
+            roll_keep 5
+        }
+        format json
+    }
+
+    # Security headers
+    header {
+        X-Content-Type-Options "nosniff"
+        X-Frame-Options "DENY"
+        X-XSS-Protection "1; mode=block"
+        Referrer-Policy "strict-origin-when-cross-origin"
+        -Server
+    }
+
+    # Health check
+    handle /healthz {
+        respond "healthy" 200
+    }
+
+    # 1 GiB streaming uploads without buffering (P1 INGEST-01)
+    handle /v1/friday/conversations/*/attachments/upload* {
+        request_body {
+            max_size 1GiB
+        }
+        reverse_proxy 127.0.0.1:3000 {
+            transport http {
+                read_buffer 0
+            }
+            flush_interval -1
+        }
+    }
+
+    # Real-time SSE streaming for chat & LLM reasoning
+    handle /v1/friday/conversations/*/messages* {
+        reverse_proxy 127.0.0.1:3000 {
+            flush_interval -1
+        }
+    }
+
+    # API Gateway routes
+    handle /v1/* {
+        reverse_proxy 127.0.0.1:3000
+    }
+
+    # Web UI SPA frontend with WebSocket upgrade support
+    handle /* {
+        reverse_proxy 127.0.0.1:5173
+    }
+}

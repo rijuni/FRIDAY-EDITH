@@ -479,7 +479,7 @@ def test_chat_stream_injects_scoped_retrieval_and_user_memory():
         is_mock = False
         def count_tokens(self, text):
             return max(1, len(text) // 4)
-        async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096):
+        async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096, *args, **kwargs):
             captured["messages"] = messages
             captured["system_prompt"] = system_prompt
             yield NormalizedChunk(event="chunk", text="It is in your document.")
@@ -511,6 +511,37 @@ def test_chat_stream_injects_scoped_retrieval_and_user_memory():
         model_router.resolve_provider = original_resolver
 
 
+def test_forwarded_user_provider_key_supported():
+    captured_key = {}
+    class CustomKeyProvider:
+        model_id = "test-custom-key-model"
+        is_mock = False
+        def count_tokens(self, text):
+            return max(1, len(text) // 4)
+        async def generate_stream(self, messages, system_prompt="", temperature=0.7, max_tokens=4096, api_key=None):
+            captured_key["api_key"] = api_key
+            yield NormalizedChunk(event="chunk", text="Using user-scoped key.")
+            yield NormalizedChunk(event="done")
+
+    original_resolver = model_router.resolve_provider
+    model_router.resolve_provider = lambda model: CustomKeyProvider()
+    try:
+        headers = {**INTERNAL_HEADERS, "X-Provider-Api-Key": "sk-user-vault-secret-key-9999"}
+        response = client.post(
+            "/v1/chat/stream",
+            headers=headers,
+            json={
+                "model": "test-custom-key-model",
+                "messages": [{"role": "user", "content": "Test custom key"}]
+            }
+        )
+        assert response.status_code == 200
+        assert captured_key.get("api_key") == "sk-user-vault-secret-key-9999"
+        assert "Using user-scoped key" in response.text
+    finally:
+        model_router.resolve_provider = original_resolver
+
+
 if __name__ == "__main__":
     print("Running F.R.I.D.A.Y. AI Service Tests...")
     test_health_check()
@@ -529,5 +560,7 @@ if __name__ == "__main__":
     test_anthropic_and_gemini_provider_stream_normalization()
     test_clamav_scanner_protocol_and_fail_closed()
     test_chat_stream_injects_scoped_retrieval_and_user_memory()
-    print("All 17 F.R.I.D.A.Y. AI Python tests passed successfully.")
+    test_forwarded_user_provider_key_supported()
+    print("All 18 F.R.I.D.A.Y. AI Python tests passed successfully.")
+
 
