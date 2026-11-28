@@ -133,6 +133,27 @@ describe('Frontend F.R.I.D.A.Y. Modals, Voice Controls & Ingestion Boundaries', 
     assert.match(html, /Create a knowledge base/);
   });
 
+  it('FridayGoogleModal renders accessible dialog, tabs, and zero-trust protection', async () => {
+    const FridayGoogleModal = await loadJsxComponent(
+      'features/friday/components/FridayGoogleModal.jsx',
+      'FridayGoogleModal'
+    );
+
+    const html = renderToStaticMarkup(
+      React.createElement(FridayGoogleModal, {
+        isOpen: true,
+        onClose: () => { }
+      })
+    );
+
+    assert.match(html, /role="dialog"/);
+    assert.match(html, /Google Workspace Integrations/);
+    assert.match(html, /Connection &amp; Scopes/);
+    assert.match(html, /Workspace Context/);
+    assert.match(html, /Governed Actions/);
+    assert.match(html, /Zero-Trust Google Token Security/);
+  });
+
   it('NebulaOrb renders visual AI state indicator', async () => {
     const NebulaOrb = await loadJsxComponent(
       'features/friday/components/NebulaOrb.jsx',

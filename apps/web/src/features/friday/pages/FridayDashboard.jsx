@@ -37,7 +37,8 @@ import {
   AlertCircle,
   X,
   Loader2,
-  FileText
+  FileText,
+  Mail
 } from 'lucide-react';
 import { useFridayStore } from '../../../stores/fridayStore';
 import { useAuthStore } from '../../../stores/authStore';
@@ -46,6 +47,7 @@ import { FridaySettingsModal } from '../components/FridaySettingsModal';
 import { FridayHelpModal } from '../components/FridayHelpModal';
 import { FridayMemoryModal } from '../components/FridayMemoryModal';
 import { FridayKnowledgeModal } from '../components/FridayKnowledgeModal';
+import { FridayGoogleModal } from '../components/FridayGoogleModal';
 
 const MAX_ATTACHMENT_BYTES = 1024 * 1024 * 1024;
 const EXTENSION_MIME_MAP = {
@@ -74,6 +76,7 @@ export function FridayDashboard() {
   const [helpOpen, setHelpOpen] = useState(false);
   const [memoryOpen, setMemoryOpen] = useState(false);
   const [knowledgeOpen, setKnowledgeOpen] = useState(false);
+  const [googleOpen, setGoogleOpen] = useState(false);
   const {
     conversations,
     pagination,
@@ -398,6 +401,14 @@ export function FridayDashboard() {
             >
               <BookOpen className="h-4 w-4" />
               <span>Knowledge Bases</span>
+            </button>
+            <button
+              type="button"
+              onClick={() => setGoogleOpen(true)}
+              className="mb-4 -mt-2 flex w-full items-center justify-center gap-2 rounded-xl border border-emerald-300/20 bg-white/5 px-4 py-2 text-xs font-medium text-emerald-100 transition-colors hover:bg-emerald-500/15 cursor-pointer"
+            >
+              <Mail className="h-4 w-4" />
+              <span>Google Workspace</span>
             </button>
 
             {/* Recent Transcripts List */}
@@ -1011,6 +1022,7 @@ export function FridayDashboard() {
       <FridaySettingsModal isOpen={settingsOpen} onClose={() => setSettingsOpen(false)} />
       <FridayMemoryModal isOpen={memoryOpen} onClose={() => setMemoryOpen(false)} />
       <FridayKnowledgeModal isOpen={knowledgeOpen} onClose={() => setKnowledgeOpen(false)} />
+      <FridayGoogleModal isOpen={googleOpen} onClose={() => setGoogleOpen(false)} />
       <FridayHelpModal
         isOpen={helpOpen}
         onClose={() => setHelpOpen(false)}

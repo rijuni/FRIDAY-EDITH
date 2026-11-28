@@ -8,6 +8,8 @@
  * is classified as untrusted external reference data.
  */
 
+import { assertSafeOutboundUrl } from '../../../security/ssrf.js';
+
 const GITHUB_API_BASE = 'https://api.github.com';
 const TIMEOUT_MS = 15000;
 
@@ -25,6 +27,7 @@ export class GitHubAdapter {
     }
 
     const url = endpoint.startsWith('http') ? endpoint : `${GITHUB_API_BASE}${endpoint}`;
+    assertSafeOutboundUrl(url, ['api.github.com']);
     const headers = {
       Accept: 'application/vnd.github.v3+json',
       'User-Agent': 'Friday-Edith-Agent/2.1',

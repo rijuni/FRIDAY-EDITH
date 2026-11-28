@@ -2,6 +2,7 @@ import path from 'path';
 import fs from 'fs';
 import { prisma } from '../../repositories/prisma.js';
 import { githubAdapter } from './adapters/github.adapter.js';
+import { googleAdapter } from './adapters/google.adapter.js';
 
 /**
  * Registry of typed tools available for execution.
@@ -329,6 +330,228 @@ registerTool({
       head: params.head,
       base: params.base || 'main',
       draft: Boolean(params.draft),
+      accessToken
+    });
+  }
+});
+
+// 11. gmail_search_messages: Search user emails matching query
+registerTool({
+  id: 'gmail_search_messages',
+  name: 'Gmail Message Search',
+  description: 'Searches user emails matching a specified search query or keywords.',
+  riskClass: 'READ_ONLY',
+  requiredScopes: ['gmail:read'],
+  parametersSchema: {
+    type: 'object',
+    required: ['query'],
+    properties: {
+      query: { type: 'string', minLength: 1, maxLength: 200 },
+      maxResults: { type: 'number', minimum: 1, maximum: 25 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.searchMessages({
+      query: params.query,
+      maxResults: params.maxResults || 10,
+      accessToken
+    });
+  }
+});
+
+// 12. gmail_read_message: Read a specific message with headers and bounded body
+registerTool({
+  id: 'gmail_read_message',
+  name: 'Gmail Message Reader',
+  description: 'Reads headers, snippet, and content of a specific Gmail message.',
+  riskClass: 'READ_ONLY',
+  requiredScopes: ['gmail:read'],
+  parametersSchema: {
+    type: 'object',
+    required: ['messageId'],
+    properties: {
+      messageId: { type: 'string', minLength: 1, maxLength: 100 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.getMessage({
+      messageId: params.messageId,
+      accessToken
+    });
+  }
+});
+
+// 13. gmail_create_draft: Governed Write - Create an email draft (requires ToolApproval)
+registerTool({
+  id: 'gmail_create_draft',
+  name: 'Gmail Draft Creator',
+  description: 'Creates a new Gmail draft without sending it immediately.',
+  riskClass: 'WRITE',
+  requiredScopes: ['gmail:write'],
+  parametersSchema: {
+    type: 'object',
+    required: ['to', 'subject', 'body'],
+    properties: {
+      to: { type: 'string', minLength: 3, maxLength: 254 },
+      subject: { type: 'string', minLength: 1, maxLength: 200 },
+      body: { type: 'string', maxLength: 10000 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.createDraft({
+      to: params.to,
+      subject: params.subject,
+      body: params.body,
+      accessToken
+    });
+  }
+});
+
+// 14. gmail_send_message: Governed Write - Send an email directly (requires ToolApproval)
+registerTool({
+  id: 'gmail_send_message',
+  name: 'Gmail Email Sender',
+  description: 'Sends an email to a recipient. Requires explicit user review and confirmation.',
+  riskClass: 'WRITE',
+  requiredScopes: ['gmail:write'],
+  parametersSchema: {
+    type: 'object',
+    required: ['to', 'subject', 'body'],
+    properties: {
+      to: { type: 'string', minLength: 3, maxLength: 254 },
+      subject: { type: 'string', minLength: 1, maxLength: 200 },
+      body: { type: 'string', maxLength: 10000 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.sendMessage({
+      to: params.to,
+      subject: params.subject,
+      body: params.body,
+      accessToken
+    });
+  }
+});
+
+// 15. calendar_list_events: List calendar events in a window
+registerTool({
+  id: 'calendar_list_events',
+  name: 'Google Calendar Event List',
+  description: 'Lists upcoming calendar events within an optional time range.',
+  riskClass: 'READ_ONLY',
+  requiredScopes: ['calendar:read'],
+  parametersSchema: {
+    type: 'object',
+    properties: {
+      timeMin: { type: 'string', maxLength: 50 },
+      timeMax: { type: 'string', maxLength: 50 },
+      maxResults: { type: 'number', minimum: 1, maximum: 50 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.listEvents({
+      timeMin: params.timeMin,
+      timeMax: params.timeMax,
+      maxResults: params.maxResults || 15,
+      accessToken
+    });
+  }
+});
+
+// 16. calendar_freebusy: Query free/busy slots
+registerTool({
+  id: 'calendar_freebusy',
+  name: 'Google Calendar Free/Busy',
+  description: 'Checks busy time slots in the primary calendar for scheduling.',
+  riskClass: 'READ_ONLY',
+  requiredScopes: ['calendar:read'],
+  parametersSchema: {
+    type: 'object',
+    required: ['timeMin', 'timeMax'],
+    properties: {
+      timeMin: { type: 'string', minLength: 1, maxLength: 50 },
+      timeMax: { type: 'string', minLength: 1, maxLength: 50 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.getFreeBusy({
+      timeMin: params.timeMin,
+      timeMax: params.timeMax,
+      accessToken
+    });
+  }
+});
+
+// 17. calendar_create_event: Governed Write - Create a calendar event (requires ToolApproval)
+registerTool({
+  id: 'calendar_create_event',
+  name: 'Google Calendar Event Creator',
+  description: 'Creates a calendar event. Requires explicit user preview and approval.',
+  riskClass: 'WRITE',
+  requiredScopes: ['calendar:write'],
+  parametersSchema: {
+    type: 'object',
+    required: ['summary', 'start', 'end'],
+    properties: {
+      summary: { type: 'string', minLength: 1, maxLength: 200 },
+      start: { type: 'string', minLength: 1, maxLength: 50 },
+      end: { type: 'string', minLength: 1, maxLength: 50 },
+      description: { type: 'string', maxLength: 2000 },
+      location: { type: 'string', maxLength: 300 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.createEvent({
+      summary: params.summary,
+      start: params.start,
+      end: params.end,
+      description: params.description,
+      location: params.location,
+      accessToken
+    });
+  }
+});
+
+// 18. drive_search_files: Search files in Google Drive
+registerTool({
+  id: 'drive_search_files',
+  name: 'Google Drive File Search',
+  description: 'Searches for files in Google Drive by filename or query.',
+  riskClass: 'READ_ONLY',
+  requiredScopes: ['drive:read'],
+  parametersSchema: {
+    type: 'object',
+    properties: {
+      query: { type: 'string', maxLength: 200 },
+      maxResults: { type: 'number', minimum: 1, maximum: 30 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.searchFiles({
+      query: params.query || '',
+      maxResults: params.maxResults || 10,
+      accessToken
+    });
+  }
+});
+
+// 19. drive_read_file: Read bounded text content of a Drive file or Doc
+registerTool({
+  id: 'drive_read_file',
+  name: 'Google Drive File Reader',
+  description: 'Reads text content or exports a Google Doc up to 512 KB.',
+  riskClass: 'READ_ONLY',
+  requiredScopes: ['drive:read'],
+  parametersSchema: {
+    type: 'object',
+    required: ['fileId'],
+    properties: {
+      fileId: { type: 'string', minLength: 1, maxLength: 100 }
+    }
+  },
+  execute: async ({ params, accessToken }) => {
+    return googleAdapter.readFile({
+      fileId: params.fileId,
       accessToken
     });
   }
